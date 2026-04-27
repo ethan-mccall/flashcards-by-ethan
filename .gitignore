@@ -1,0 +1,31 @@
+# Build directories
+build*/
+build-*/
+build-debug/
+build-release/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+CMakeDoxyfile.in
+CMakeDoxygenDefaults.*
+compile_commands.json
+
+# Qt
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+
+# Snap
+*.snap
+snap/.snapcraft/
+parts/
+stage/
+prime/
+
+# Misc
+.vscode/
+.cache/
+*.user
+.DS_Store

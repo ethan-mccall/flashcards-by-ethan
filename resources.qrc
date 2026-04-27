@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>changelog.html</file>
+        <file>icons/icon.ico</file>
+        <file>LICENSE</file>
+    </qresource>
+</RCC>

@@ -1,0 +1,83 @@
+name: flashcards-by-ethan
+version: '0.1.1'
+summary: A simple flashcard and quiz app
+description: |
+  Flashcards is an intuitive flashcard application built for effective learning.
+
+  Easily create and organize folders and decks. Add, edit, and study flashcards using two quiz modes: standard flashcards and multiple choice.
+
+  **Features:**
+  * Rich folder and deck organization
+  * Easy flashcard creation and editing
+  * Two quiz modes: Flashcard and Multiple Choice
+  * Flashcard mastery tracking system
+  * Clean home-page navigation and overview
+  * Daily streak counter and performance statistics
+
+  Perfect for students, professionals, or anyone wanting an effective, distraction-free way to memorize and retain information.
+
+title: Flashcards by Ethan
+icon: icons/icon.png
+
+issues: https://github.com/ethan-mccall/flashcards-by-ethan/issues
+source-code: https://github.com/ethan-mccall/flashcards-by-ethan
+donation: https://buymeacoffee.com/ethan_mccall
+license: GPL-3.0+
+
+grade: devel
+confinement: strict
+base: core24
+
+apps:
+  flashcards-by-ethan:
+    command: usr/bin/Flashcards
+    desktop: usr/share/applications/flashcards-by-ethan.desktop
+    extensions:
+      - kde-neon-6
+    plugs:
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - opengl
+    environment:
+      QT_QPA_PLATFORM: xcb
+      QT_DEBUG_PLUGINS: 0
+      XDG_RUNTIME_DIR: $SNAP_USER_DATA/runtime
+      LD_LIBRARY_PATH: $SNAP/usr/lib/x86_64-linux-gnu:$SNAP/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+
+parts:
+  flashcards:
+    plugin: cmake
+    source: .
+    cmake-generator: Ninja
+    cmake-parameters:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_PREFIX=/usr
+
+    build-packages:
+      - build-essential
+      - cmake
+      - ninja-build
+
+    stage-packages:
+      - librsvg2-common
+      - gsettings-desktop-schemas
+      - breeze
+
+    override-build: |
+      craftctl default
+
+      mkdir -p $CRAFT_PART_INSTALL/usr/share/applications
+      cp $CRAFT_PART_SRC/snap/gui/flashcards-by-ethan.desktop $CRAFT_PART_INSTALL/usr/share/applications/flashcards-by-ethan.desktop
+
+      # Install icon in multiple sizes (helps KDE Plasma)
+      for size in 48 64 128 256; do
+        mkdir -p $CRAFT_PART_INSTALL/usr/share/icons/hicolor/${size}x${size}/apps
+        cp $CRAFT_PART_SRC/icons/icon.png $CRAFT_PART_INSTALL/usr/share/icons/hicolor/${size}x${size}/apps/flashcards-by-ethan.png
+      done
+
+      # Provide the icon under BOTH names (very important for KDE)
+      mkdir -p $CRAFT_PART_INSTALL/snap/gui
+      cp $CRAFT_PART_SRC/icons/icon.png $CRAFT_PART_INSTALL/snap/gui/flashcards-by-ethan.png
+      cp $CRAFT_PART_SRC/icons/icon.png $CRAFT_PART_INSTALL/snap/gui/icon.png

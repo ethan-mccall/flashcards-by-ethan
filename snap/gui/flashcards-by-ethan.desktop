@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Flashcards by Ethan
+Comment=Flashcard quiz app
+Exec=flashcards-by-ethan
+Icon=flashcards-by-ethan
+Type=Application
+Categories=Education;Utility;Qt;
+StartupNotify=true
+Terminal=false
