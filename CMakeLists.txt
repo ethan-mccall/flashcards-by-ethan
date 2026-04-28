@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Flashcards VERSION 0.1.1 LANGUAGES CXX)
+project(Flashcards VERSION 1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,6 +17,7 @@ qt_add_executable(Flashcards
     resources.qrc
     snap/snapcraft.yaml
     snap/gui/flashcards-by-ethan.desktop
+    README.md
 )
 
 set_target_properties(Flashcards PROPERTIES
@@ -42,7 +43,7 @@ install(FILES icons/icon.png
 
 set(CPACK_PACKAGE_NAME "flashcards-by-ethan")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Ethan McCall <your-email@example.com>")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Ethan McCall <ethan-mccall@users.noreply.github.com>")
 set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "A simple flashcard and quiz app built for effective learning.")
 set(CPACK_DEBIAN_PACKAGE_SECTION "education")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ethan-mccall/flashcards-by-ethan")

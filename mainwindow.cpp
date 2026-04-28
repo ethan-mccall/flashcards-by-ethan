@@ -3785,7 +3785,7 @@ void MainWindow::showAboutDialog()
 {
     QDialog *aboutDialog = new QDialog(this);
     aboutDialog->setWindowTitle("About Flashcards");
-    aboutDialog->resize(520, 380);
+    aboutDialog->resize(600, 440);
     aboutDialog->setStyleSheet("background-color: #2c3e50; color: white;");
 
     QVBoxLayout *layout = new QVBoxLayout(aboutDialog);
@@ -3796,16 +3796,15 @@ void MainWindow::showAboutDialog()
     titleLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(titleLabel);
 
-    QLabel *versionLabel = new QLabel("Version 0.1.1", aboutDialog);
+    QLabel *versionLabel = new QLabel("Version 1.0", aboutDialog);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 16px; color: #bdc3c7;");
     layout->addWidget(versionLabel);
 
     layout->addSpacing(10);
 
-    QLabel *desc = new QLabel("Flashcards is an intuitive flashcard application built for effective learning.\n"
-                              "Perfect for anyone wanting an effective way for memorizing information.", aboutDialog);
-
+    QLabel *desc = new QLabel("A clean and simple flashcard app to help you study and memorize anything effectively.\n\n"
+                              "Create folders and decks with drag-and-drop, add your cards, and track your progress with mastery levels and daily streaks.", aboutDialog);
     desc->setAlignment(Qt::AlignCenter);
     desc->setWordWrap(true);
     layout->addWidget(desc);
@@ -3818,8 +3817,12 @@ void MainWindow::showAboutDialog()
     licenseLabel->setStyleSheet("font-size: 15px; color: #95a5a6;");
     layout->addWidget(licenseLabel);
 
-    QPushButton *viewLicenseBtn = new QPushButton("View Full GPL-3.0+ License", aboutDialog);
-    viewLicenseBtn->setStyleSheet(R"(
+    // Buttons
+    QPushButton *githubBtn = new QPushButton("View on GitHub", aboutDialog);
+    QPushButton *bugBtn    = new QPushButton("Report a Bug", aboutDialog);
+    QPushButton *viewLicenseBtn = new QPushButton("View Full GPL License", aboutDialog);
+
+    QString btnStyle = R"(
         QPushButton {
             background-color: #34495e;
             color: white;
@@ -3829,24 +3832,45 @@ void MainWindow::showAboutDialog()
             font-size: 14px;
             font-weight: bold;
         }
-        QPushButton:hover { border: 2px solid #3498db; }
-    )");
-    connect(viewLicenseBtn, &QPushButton::clicked, this, &MainWindow::showFullLicense);
-    layout->addWidget(viewLicenseBtn);
+        QPushButton:hover {
+            border: 2px solid #3498db;
+            background-color: #3d4f63;
+        }
+    )";
 
+    githubBtn->setStyleSheet(btnStyle);
+    bugBtn->setStyleSheet(btnStyle);
+    viewLicenseBtn->setStyleSheet(btnStyle);
+
+    connect(githubBtn, &QPushButton::clicked, this, [](){
+        QDesktopServices::openUrl(QUrl("https://github.com/ethan-mccall/flashcards-by-ethan"));
+    });
+
+    connect(bugBtn, &QPushButton::clicked, this, [](){
+        QDesktopServices::openUrl(QUrl("https://github.com/ethan-mccall/flashcards-by-ethan/issues"));
+    });
+
+    connect(viewLicenseBtn, &QPushButton::clicked, this, &MainWindow::showFullLicense);
+
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    btnLayout->addWidget(githubBtn);
+    btnLayout->addWidget(bugBtn);
+    btnLayout->addWidget(viewLicenseBtn);
+    layout->addLayout(btnLayout);
+
+    // Close button
     QPushButton *closeBtn = new QPushButton("Close", aboutDialog);
     closeBtn->setStyleSheet(R"(
         QPushButton {
-            background-color: #34495e;
+            background-color: #27ae60;
             color: white;
             padding: 12px 32px;
-            border-radius: 8px;
-            border: 2px solid #455a6f;
-            font-size: 14px;
+            font-size: 16px;
             font-weight: bold;
+            border-radius: 8px;
         }
         QPushButton:hover {
-            border: 2px solid #3498db;
+            border: 2px solid #ffffff;
         }
     )");
     connect(closeBtn, &QPushButton::clicked, aboutDialog, &QDialog::accept);

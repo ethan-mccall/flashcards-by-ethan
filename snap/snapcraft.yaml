@@ -1,20 +1,12 @@
 name: flashcards-by-ethan
-version: '0.1.1'
-summary: A simple flashcard and quiz app
+version: '1.0'
+summary: Flashcards that actually stick
 description: |
-  Flashcards is an intuitive flashcard application built for effective learning.
+  Flashcards by Ethan is a clean and simple offline flashcard app designed to help you study effectively and actually remember what you learn.
 
-  Easily create and organize folders and decks. Add, edit, and study flashcards using two quiz modes: standard flashcards and multiple choice.
+  Easily create folders and decks with drag-and-drop. Add your cards, quiz yourself in Flashcard or Multiple Choice mode, and track your progress with mastery levels and daily streaks.
 
-  **Features:**
-  * Rich folder and deck organization
-  * Easy flashcard creation and editing
-  * Two quiz modes: Flashcard and Multiple Choice
-  * Flashcard mastery tracking system
-  * Clean home-page navigation and overview
-  * Daily streak counter and performance statistics
-
-  Perfect for students, professionals, or anyone wanting an effective, distraction-free way to memorize and retain information.
+  Perfect for students, professionals, language learners, or anyone who wants a distraction-free way to memorize and retain information.
 
 title: Flashcards by Ethan
 icon: icons/icon.png
@@ -30,7 +22,7 @@ base: core24
 
 apps:
   flashcards-by-ethan:
-    command: usr/bin/Flashcards
+    command: usr/bin/flashcards-by-ethan
     desktop: usr/share/applications/flashcards-by-ethan.desktop
     extensions:
       - kde-neon-6
