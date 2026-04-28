@@ -21,6 +21,16 @@
 
 ---
 
+| Home Page | Deck Editor |
+|----------|-------------|
+| ![Overview](images/screenshot-home-page.png) | ![Deck Editor](images/screenshot-deck-page.png) |
+
+| Flashcard Quiz | Multiple Choice Quiz |
+|----------------|----------------------|
+| ![Flashcard Mode](images/screenshot-flashcard-quiz.png) | ![Quiz Mode](images/screenshot-multi-choice-quiz.png) |
+
+---
+
 ## 📥 Downloads & Installation
 
 ### Debian / Ubuntu
