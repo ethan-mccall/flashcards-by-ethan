@@ -1,4 +1,4 @@
-# Flashcards by Ethan
+# Flashcards by Ethan (v1.0)
 
 **A clean, modern, and distraction-free flashcard + quiz app.**
 
