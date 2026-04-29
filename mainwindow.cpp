@@ -321,11 +321,13 @@ MainWindow::MainWindow(QWidget *parent)
     deckTree->setAcceptDrops(true);
     deckTree->setDropIndicatorShown(true);
     deckTree->setDragDropMode(QAbstractItemView::InternalMove);
+    deckTree->setDefaultDropAction(Qt::MoveAction);
+    deckTree->viewport()->installEventFilter(this);
+
     connect(deckTree->model(), &QAbstractItemModel::rowsMoved,
             this, &MainWindow::saveDecks);
     sideLayout->addWidget(deckTree, 1);
 
-    // Expand/Collapse All Buttons
     QHBoxLayout *expandLayout = new QHBoxLayout();
     expandLayout->setSpacing(6);
     QPushButton *expandAllBtn = new QPushButton("Expand All", sidePanel);
@@ -398,6 +400,8 @@ MainWindow::MainWindow(QWidget *parent)
     settingsFilePath = dataDir + "/settings.json";
 
     loadDecks();
+    connect(deckTree, &QTreeWidget::itemExpanded,  this, &MainWindow::saveDecks);
+    connect(deckTree, &QTreeWidget::itemCollapsed, this, &MainWindow::saveDecks);
     loadSettings();
 
     checkDailyStreakAtLaunch();
@@ -509,19 +513,19 @@ void MainWindow::saveDecks()
     QJsonDocument doc(rootArray);
     QFile file(decksFilePath);
     if (file.open(QIODevice::WriteOnly)) {
-        file.write(doc.toJson(QJsonDocument::Compact));
+        file.write(doc.toJson(QJsonDocument::Indented));
         file.close();
-    } else {
-        qDebug() << "Failed to save decks!";
     }
 }
 
 void MainWindow::saveTreeItem(QJsonArray &array, QTreeWidgetItem *item)
 {
     if (!item) return;
+
     QJsonObject obj;
     obj["name"] = item->text(0);
     obj["type"] = item->data(0, Qt::UserRole).toString();
+
     if (item->data(0, Qt::UserRole).toString() == "deck") {
         QVariant cardsVar = item->data(0, Qt::UserRole + 1);
         if (cardsVar.isValid() && cardsVar.canConvert<QJsonArray>()) {
@@ -529,39 +533,59 @@ void MainWindow::saveTreeItem(QJsonArray &array, QTreeWidgetItem *item)
         }
         obj["lastQuiz"] = item->data(0, Qt::UserRole + 2).toString();
     }
+    else if (item->data(0, Qt::UserRole).toString() == "folder") {
+        obj["expanded"] = item->isExpanded();
+    }
+
     QJsonArray children;
     for (int i = 0; i < item->childCount(); ++i) {
         saveTreeItem(children, item->child(i));
     }
     obj["children"] = children;
+
     array.append(obj);
 }
 
 QTreeWidgetItem* MainWindow::loadTreeItem(const QJsonObject &obj, QTreeWidgetItem *parent)
 {
     if (obj.isEmpty()) return nullptr;
+
     QString type = obj["type"].toString();
     QTreeWidgetItem *item = new QTreeWidgetItem(QStringList() << obj["name"].toString());
+
     if (type == "deck") {
         item->setIcon(0, QIcon::fromTheme("document-edit"));
         if (obj.contains("cards")) {
             item->setData(0, Qt::UserRole + 1, obj["cards"].toArray());
         }
         item->setData(0, Qt::UserRole + 2, obj.value("lastQuiz").toString());
-    } else {
-        item->setIcon(0, QIcon::fromTheme("folder"));
     }
+    else if (type == "folder") {
+        item->setIcon(0, QIcon::fromTheme("folder"));
+
+        bool expanded = obj.value("expanded").toBool(true);
+        item->setExpanded(expanded);
+    }
+
     item->setData(0, Qt::UserRole, type);
     item->setFlags(item->flags() | Qt::ItemIsEditable);
+
     if (parent) {
         parent->addChild(item);
     } else {
         deckTree->addTopLevelItem(item);
     }
+
     QJsonArray children = obj["children"].toArray();
     for (const QJsonValue &childVal : children) {
         loadTreeItem(childVal.toObject(), item);
     }
+
+    if (type == "folder") {
+        bool expanded = obj.value("expanded").toBool(true);
+        item->setExpanded(expanded);
+    }
+
     return item;
 }
 
@@ -591,7 +615,6 @@ void MainWindow::loadDecks()
     for (const QJsonValue &val : rootArray) {
         loadTreeItem(val.toObject());
     }
-    deckTree->expandAll();
 }
 
 void MainWindow::onDeckSelectionChanged()
@@ -778,8 +801,21 @@ void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
             color: #bdc3c7;
         }
     )");
-    startQuizButton->setEnabled(cardCount > 0);
+
+    auto updateStartButton = [this]() {
+        if (!startQuizButton) return;
+        int cardCount = currentDeckItem ?
+                            currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray().size() : 0;
+
+        bool isMCQ = !lastUsedFlashcardMode;
+        bool enabled = (cardCount > 0) && !(isMCQ && cardCount == 1);
+        startQuizButton->setEnabled(enabled);
+    };
+
+    updateStartButton();
     connect(startQuizButton, &QPushButton::clicked, this, &MainWindow::startQuiz);
+
+    //startQuizButton->setEnabled(cardCount > 0);
 
     // Quiz Type Button
     QPushButton *quizTypeBtn = new QPushButton(topArea);
@@ -803,10 +839,11 @@ void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
             border: 2px solid #ffffff;
         }
     )");
-    connect(quizTypeBtn, &QPushButton::clicked, this, [this, quizTypeBtn](bool checked) {
+    connect(quizTypeBtn, &QPushButton::clicked, this, [this, quizTypeBtn, updateStartButton](bool checked) {
         lastUsedFlashcardMode = checked;
         quizTypeBtn->setText(checked ? "Flashcard Style" : "Multiple Choice");
         saveSettings();
+        updateStartButton();
     });
 
     // Shuffle Button
@@ -1353,15 +1390,18 @@ void MainWindow::showHomePage()
 
     for (auto d : allDecks) {
         int mastery = getDeckAverageMastery(d);
-        if (mastery >= 100) continue;
+        if (mastery == 0 || mastery >= 100) continue;
 
-        QString lastQuizStr = d->data(0, Qt::UserRole + 2).toString();
-        if (!lastQuizStr.isEmpty()) {
+        QString lastQuizStr = d->data(0, Qt::UserRole + 2).toString().trimmed();
+
+        if (lastQuizStr.isEmpty()) {
+            reviewDecks << d;
+        } else {
             QDateTime lastQuiz = QDateTime::fromString(lastQuizStr, Qt::ISODate);
-            if (lastQuiz.date() == today) continue;
+            if (!lastQuiz.isValid() || lastQuiz.date() != today) {
+                reviewDecks << d;
+            }
         }
-
-        reviewDecks << d;
     }
 
     std::sort(reviewDecks.begin(), reviewDecks.end(), [this](QTreeWidgetItem* a, QTreeWidgetItem* b) {
@@ -1544,7 +1584,42 @@ QWidget* MainWindow::createCardRow(const QString &front, const QString &back, in
     });
     connect(qEdit, &QTextEdit::textChanged, this, [this, qEdit]() { resizeRowToContent(qEdit); markDeckAsDirty(); });
     connect(aEdit, &QTextEdit::textChanged, this, [this, aEdit]() { resizeRowToContent(aEdit); markDeckAsDirty(); });
+
+    rowWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(rowWidget, &QWidget::customContextMenuRequested, this,
+            [this, rowWidget](const QPoint &pos) {
+                QMenu menu(this);
+                QAction *swapAction = menu.addAction(QIcon::fromTheme("object-flip-horizontal"),
+                                                     "Swap Front ↔ Back");
+                connect(swapAction, &QAction::triggered, this,
+                        [this, rowWidget]() { swapCardFrontAndBack(rowWidget); });
+
+                menu.exec(rowWidget->mapToGlobal(pos));
+            });
+
     return rowWidget;
+}
+
+void MainWindow::swapCardFrontAndBack(QWidget *rowWidget)
+{
+    if (!rowWidget) return;
+
+    QHBoxLayout *h = qobject_cast<QHBoxLayout*>(rowWidget->layout());
+    if (!h) return;
+
+    QTextEdit *frontEdit = qobject_cast<QTextEdit*>(h->itemAt(1)->widget());
+    QTextEdit *backEdit  = qobject_cast<QTextEdit*>(h->itemAt(2)->widget());
+
+    if (!frontEdit || !backEdit) return;
+
+    QString front = frontEdit->toPlainText();
+    QString back  = backEdit->toPlainText();
+
+    frontEdit->setPlainText(back);
+    backEdit->setPlainText(front);
+
+    markDeckAsDirty();
+    resizeRowToContent(frontEdit);  // update heights
 }
 
 void MainWindow::addCardRow(const QString &front, const QString &back, int mastery)
@@ -1884,16 +1959,10 @@ void MainWindow::updateToolbarActions()
 
 void CustomTreeWidget::dropEvent(QDropEvent *event)
 {
-    QTreeWidgetItem *target = itemAt(event->position().toPoint());
-    QString targetType = target ? target->data(0, Qt::UserRole).toString() : QString();
+    QTreeWidget::dropEvent(event);
 
-    if (!target || targetType == "folder") {
-        QTreeWidget::dropEvent(event);
-        if (MainWindow* mw = qobject_cast<MainWindow*>(window())) {
-            mw->saveDecks();
-        }
-    } else {
-        event->ignore();
+    if (MainWindow* mw = qobject_cast<MainWindow*>(window())) {
+        mw->saveDecks();
     }
 }
 
@@ -1934,6 +2003,7 @@ void MainWindow::deleteCurrentFolder()
 void MainWindow::resetDeckMastery()
 {
     if (!currentDeckItem) return;
+
     QJsonArray cards = currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray();
     for (int i = 0; i < cards.size(); ++i) {
         QJsonObject obj = cards[i].toObject();
@@ -1941,41 +2011,134 @@ void MainWindow::resetDeckMastery()
         cards[i] = obj;
     }
     currentDeckItem->setData(0, Qt::UserRole + 1, cards);
+
+    currentDeckItem->setData(0, Qt::UserRole + 2,
+                             QDateTime::currentDateTime().toString(Qt::ISODate));
+
     saveDecks();
+
     if (deckMasteryRadial && currentDeckItem) {
-        deckMasteryRadial->setValue(getDeckAverageMastery(currentDeckItem));
+        deckMasteryRadial->setValue(0);
     }
-    if (currentDeckItem) showDeckContent(currentDeckItem);
-    qDebug() << "✅ All masteries reset to 0%";
+
+    showDeckContent(currentDeckItem);
 }
 
 QTreeWidgetItem* MainWindow::duplicateTreeItemRecursive(QTreeWidgetItem *source, QTreeWidgetItem *parent)
 {
-    QTreeWidgetItem *copy = new QTreeWidgetItem(parent, QStringList() << source->text(0) + " (Copy)");
-    copy->setIcon(0, source->icon(0));
-    copy->setData(0, Qt::UserRole, source->data(0, Qt::UserRole));
-    copy->setFlags(copy->flags() | Qt::ItemIsEditable);
-    if (source->data(0, Qt::UserRole).toString() == "deck") {
-        copy->setData(0, Qt::UserRole + 1, source->data(0, Qt::UserRole + 1));
+    if (!source) return nullptr;
+
+    QString baseName = source->text(0);
+    QString newName = baseName + " (Copy)";
+    int counter = 1;
+
+    while (true) {
+        bool exists = false;
+        int count = parent ? parent->childCount() : deckTree->topLevelItemCount();
+
+        for (int i = 0; i < count; ++i) {
+            QTreeWidgetItem *sib = parent ? parent->child(i) : deckTree->topLevelItem(i);
+            if (sib && sib->text(0) == newName) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) break;
+
+        counter++;
+        newName = baseName + " (" + QString::number(counter) + ")";
     }
+
+    QTreeWidgetItem *newItem = new QTreeWidgetItem(QStringList() << newName);
+
+    QString type = source->data(0, Qt::UserRole).toString();
+    newItem->setData(0, Qt::UserRole, type);
+    newItem->setFlags(source->flags() | Qt::ItemIsEditable);
+
+    if (type == "deck") {
+        newItem->setIcon(0, QIcon::fromTheme("document-edit"));
+        QVariant cardsVar = source->data(0, Qt::UserRole + 1);
+        if (cardsVar.isValid() && cardsVar.canConvert<QJsonArray>()) {
+            newItem->setData(0, Qt::UserRole + 1, cardsVar);
+        }
+        newItem->setData(0, Qt::UserRole + 2, QDateTime::currentDateTime().toString(Qt::ISODate));
+    } else if (type == "folder") {
+        newItem->setIcon(0, QIcon::fromTheme("folder"));
+    }
+
+    if (parent) {
+        parent->addChild(newItem);
+    } else {
+        deckTree->addTopLevelItem(newItem);
+    }
+
     for (int i = 0; i < source->childCount(); ++i) {
-        duplicateTreeItemRecursive(source->child(i), copy);
+        duplicateTreeItemRecursive(source->child(i), newItem);
     }
-    return copy;
+
+    return newItem;
+}
+
+QTreeWidgetItem* MainWindow::duplicateFolderStructureOnly(QTreeWidgetItem *source, QTreeWidgetItem *parent)
+{
+    if (!source) return nullptr;
+
+    QString baseName = source->text(0);
+    QString newName = baseName + " (Empty Copy)";
+    int counter = 1;
+
+    while (true) {
+        bool exists = false;
+        int count = parent ? parent->childCount() : deckTree->topLevelItemCount();
+        for (int i = 0; i < count; ++i) {
+            QTreeWidgetItem *sib = parent ? parent->child(i) : deckTree->topLevelItem(i);
+            if (sib && sib->text(0) == newName) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) break;
+        counter++;
+        newName = baseName + " (" + QString::number(counter) + ")";
+    }
+
+    QTreeWidgetItem *newItem = new QTreeWidgetItem(QStringList() << newName);
+    newItem->setIcon(0, QIcon::fromTheme("folder"));
+    newItem->setData(0, Qt::UserRole, "folder");
+    newItem->setFlags(newItem->flags() | Qt::ItemIsEditable);
+
+    if (parent) {
+        parent->addChild(newItem);
+    } else {
+        deckTree->addTopLevelItem(newItem);
+    }
+
+    for (int i = 0; i < source->childCount(); ++i) {
+        QTreeWidgetItem *child = source->child(i);
+        if (child->data(0, Qt::UserRole).toString() == "folder") {
+            duplicateFolderStructureOnly(child, newItem);
+        }
+    }
+
+    return newItem;
 }
 
 void MainWindow::duplicateCurrentDeck()
 {
-    if (!currentDeckItem) return;
-    QTreeWidgetItem *newDeck = new QTreeWidgetItem(
-        currentDeckItem->parent() ? currentDeckItem->parent() : deckTree->invisibleRootItem(),
-        QStringList() << currentDeckItem->text(0) + " (Copy)");
-    newDeck->setIcon(0, QIcon::fromTheme("document-edit"));
-    newDeck->setData(0, Qt::UserRole + 2, QDateTime::currentDateTime().toString(Qt::ISODate));
-    newDeck->setData(0, Qt::UserRole + 1, currentDeckItem->data(0, Qt::UserRole + 1));
-    newDeck->setFlags(newDeck->flags() | Qt::ItemIsEditable);
-    deckTree->setCurrentItem(newDeck);
-    saveDecks();
+    QTreeWidgetItem *source = deckTree->currentItem();
+    if (!source || source->data(0, Qt::UserRole).toString() != "deck") {
+        return;
+    }
+
+    QTreeWidgetItem *parent = source->parent();
+    QTreeWidgetItem *newDeck = duplicateTreeItemRecursive(source, parent);
+
+    if (newDeck) {
+        deckTree->setCurrentItem(newDeck);
+        deckTree->scrollToItem(newDeck);
+        saveDecks();
+        updateToolbarActions();
+    }
 }
 
 void MainWindow::duplicateFolderFull()
@@ -1990,16 +2153,22 @@ void MainWindow::duplicateFolderFull()
 
 void MainWindow::duplicateFolderEmpty()
 {
-    QTreeWidgetItem *item = deckTree->currentItem();
-    if (!item || item->data(0, Qt::UserRole) != "folder") return;
-    QTreeWidgetItem *parent = item->parent();
+    QTreeWidgetItem *source = deckTree->currentItem();
+    if (!source || source->data(0, Qt::UserRole).toString() != "folder") {
+        return;
+    }
+
+    QTreeWidgetItem *parent = source->parent();
     if (!parent) parent = deckTree->invisibleRootItem();
-    QTreeWidgetItem *copy = new QTreeWidgetItem(parent, QStringList() << item->text(0) + " (Empty Copy)");
-    copy->setIcon(0, QIcon::fromTheme("folder"));
-    copy->setData(0, Qt::UserRole, "folder");
-    copy->setFlags(copy->flags() | Qt::ItemIsEditable);
-    deckTree->setCurrentItem(copy);
-    saveDecks();
+
+    QTreeWidgetItem *newFolder = duplicateFolderStructureOnly(source, parent);
+
+    if (newFolder) {
+        deckTree->setCurrentItem(newFolder);
+        deckTree->scrollToItem(newFolder);
+        saveDecks();
+        updateToolbarActions();
+    }
 }
 
 void MainWindow::ensureSidebarVisible()
@@ -2121,6 +2290,21 @@ void MainWindow::startQuiz()
         }
     }
 
+    int totalAvailable = quizCardList.size();
+    int numToUse = (!isReviewMode && desiredQuestions > 0) ? desiredQuestions : totalAvailable;
+    if (numToUse > totalAvailable) numToUse = totalAvailable;
+
+    if (!userWantsFlashcard && totalAvailable < 4) {
+        if (totalAvailable == 1) {
+            QMessageBox::information(this, "Not Enough Cards",
+                                     "Multiple Choice needs at least 2 cards.\n\nSwitch to Flashcard mode or add more cards.");
+            if (currentDeckItem) showDeckContent(currentDeckItem);
+            return;
+        }
+        // 2 or 3 cards are allowed - we'll handle gracefully in loadCurrentQuestion()
+    }
+
+    /*
     int numToUse;
     if (!currentDeckItem && !isReviewMode) {
         numToUse = 10;
@@ -2128,6 +2312,7 @@ void MainWindow::startQuiz()
         numToUse = (!isReviewMode && desiredQuestions > 0) ? desiredQuestions : quizCardList.size();
     }
     if (numToUse > quizCardList.size()) numToUse = quizCardList.size();
+    */
 
     if (userWantsShuffle) {
         std::random_device rd;
@@ -2781,25 +2966,20 @@ void MainWindow::loadCurrentQuestion()
         for (int i = 0; i < possibleDistractors.size() && options.size() < 4; ++i) {
             options << possibleDistractors[i];
         }
+
         std::shuffle(options.begin(), options.end(), g);
 
-        for (int i = 0; i < 4 && i < choiceButtons.size(); ++i) {
-            choiceLabels[i]->setText(options[i]);
-            choiceButtons[i]->setEnabled(true);
+        int numChoices = options.size();
 
-            choiceButtons[i]->setStyleSheet(R"(
-                QPushButton {
-                    background-color: #2c3e50;
-                    border: 2px solid #455a6f;
-                    border-radius: 12px;
-                }
-                QPushButton:hover {
-                    border: 3px solid #3498db;
-                }
-            )");
-            choicesContainer->updateGeometry();
-            quizWidget->updateGeometry();
-            choiceLabels[i]->setStyleSheet("background: transparent; color: white; font-size: 18px; font-weight: bold;");
+        for (int i = 0; i < 4 && i < choiceButtons.size(); ++i) {
+            if (i < numChoices) {
+                QString text = options[i];
+                choiceLabels[i]->setText(text);
+                choiceButtons[i]->setEnabled(true);
+                choiceButtons[i]->setVisible(true);
+            } else {
+                choiceButtons[i]->setVisible(false);
+            }
         }
 
         if (prevButton) prevButton->setEnabled(currentCardIndex > 0);
@@ -3234,9 +3414,6 @@ void MainWindow::showSettingsPage()
 
 void MainWindow::applyStartOnLaunch()
 {
-    qDebug() << "    startOnLaunchType  =" << startOnLaunchType;
-    qDebug() << "    startOnLaunchTarget=" << startOnLaunchTarget;
-
     if (startOnLaunchType == "home" || startOnLaunchTarget.isEmpty()) {
         showHomePage();
         return;
@@ -3415,7 +3592,6 @@ void MainWindow::checkDailyStreakAtLaunch()
 
     if (lastStreakDate.daysTo(today) > 1) {
         dailyStreak = 0;
-        qDebug() << "🔥 Streak broken at launch (missed" << lastStreakDate.daysTo(today) << "days)";
     }
 }
 
@@ -3435,8 +3611,6 @@ void MainWindow::updateDailyStreak()
 
     lastStreakDate = today;
     saveSettings();
-
-    qDebug() << "🔥 Daily streak updated to" << dailyStreak << "on" << today.toString(Qt::ISODate);
 }
 
 void MainWindow::startGlobalQuiz(bool flashcardMode)
@@ -3571,8 +3745,6 @@ void MainWindow::saveSettings()
     if (file.open(QIODevice::WriteOnly)) {
         file.write(doc.toJson(QJsonDocument::Compact));
         file.close();
-    } else {
-        qDebug() << "Failed to save settings!";
     }
 }
 
@@ -3796,7 +3968,7 @@ void MainWindow::showAboutDialog()
     titleLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(titleLabel);
 
-    QLabel *versionLabel = new QLabel("Version 1.0", aboutDialog);
+    QLabel *versionLabel = new QLabel("Version 1.1", aboutDialog);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 16px; color: #bdc3c7;");
     layout->addWidget(versionLabel);

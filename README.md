@@ -1,4 +1,4 @@
-# Flashcards by Ethan
+# Flashcards by Ethan (v1.1)
 
 **A clean, modern, and distraction-free flashcard + quiz app.**
 
@@ -21,6 +21,17 @@
 
 ---
 
+
+| Home Page | Deck Editor |
+|----------|-------------|
+| ![Overview](images/screenshot-home-page.png) | ![Deck Editor](images/screenshot-deck-page.png) |
+
+| Flashcard Quiz | Multiple Choice Quiz |
+|----------------|----------------------|
+| ![Flashcard Mode](images/screenshot-flashcard-quiz.png) | ![Quiz Mode](images/screenshot-multi-choice-quiz.png) |
+
+---
+
 ## 📥 Downloads & Installation
 
 ### Debian / Ubuntu
@@ -33,7 +44,7 @@ sudo apt install -f
 ```
 To update an existing `.deb`, run:
 ```bash
-wget https://github.com/ethan-mccall/flashcards-by-ethan/releases/latest/download/flashcards-by-ethan_1.0_amd64.deb
+wget https://github.com/ethan-mccall/flashcards-by-ethan/releases/latest/download/flashcards-by-ethan_1.1_amd64.deb
 sudo dpkg -i flashcards-by-ethan_*.deb
 sudo apt install -f
 ```
@@ -47,7 +58,7 @@ sudo dpkg --purge flashcards-by-ethan
 ### Snap
 Download the latest `.snap` from the [Releases page](https://github.com/ethan-mccall/flashcards-by-ethan/releases) and run:
 ```bash
-sudo snap install flashcards-by-ethan_0.1.1_amd64.snap --dangerous
+sudo snap install flashcards-by-ethan_1.1_amd64.snap --dangerous
 ```
 ><h6>snap currently waiting in manual review.
 

@@ -110,6 +110,7 @@ private:
     QAction *deckSeparator1;
     QAction *deckSeparator2;
     QAction *endQuizAction;
+    QTreeWidgetItem* duplicateFolderStructureOnly(QTreeWidgetItem *source, QTreeWidgetItem *parent);
 
     // Data/State
     QString decksFilePath;
@@ -208,6 +209,7 @@ private:
     void resizeRowToContent(QTextEdit *edit);
     void updateAllCardHeights();
     void updateNumQuestionsRange();
+    void swapCardFrontAndBack(QWidget *rowWidget);
 
     // Home Page Helpers
     QList<QTreeWidgetItem*> collectDecksRecursive(QTreeWidgetItem* item) const;
