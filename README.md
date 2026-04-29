@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Flashcards by Ethan (v1.1)
 
 **A clean, modern, and distraction-free flashcard + quiz app.**
@@ -21,6 +22,7 @@
 
 ---
 
+<<<<<<< HEAD
 
 | Home Page | Deck Editor |
 |----------|-------------|
