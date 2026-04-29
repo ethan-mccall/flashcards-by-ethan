@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Flashcards by Ethan (v1.1)
 
 **A clean, modern, and distraction-free flashcard + quiz app.**
@@ -21,8 +20,6 @@
 - **Export / Import** - Backup and restore your entire library
 
 ---
-
-<<<<<<< HEAD
 
 | Home Page | Deck Editor |
 |----------|-------------|
