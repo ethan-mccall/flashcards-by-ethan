@@ -50,13 +50,16 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
 
+// Tree
 class CustomTreeWidget : public QTreeWidget
 {
     Q_OBJECT
 public:
     explicit CustomTreeWidget(QWidget *parent = nullptr);
+
 protected:
     void dropEvent(QDropEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
 };
 
 // Main Window
@@ -71,84 +74,91 @@ public:
     void saveDecks();
 
 private:
-    // UI/Layout
-    Ui::MainWindow *ui;
-    QToolBar *navToolBar;
-    QSplitter *splitter;
-    QWidget *sidePanel;
-    QWidget *mainContent;
+    // UI / Layout
+    Ui::MainWindow *ui = nullptr;
+    QToolBar *navToolBar = nullptr;
+    QSplitter *splitter = nullptr;
+    QWidget *sidePanel = nullptr;
+    QWidget *mainContent = nullptr;
     QVBoxLayout *mainContentLayout = nullptr;
 
     QWidget *currentDeckContainer = nullptr;
     QWidget *cardContainer = nullptr;
     QVBoxLayout *cardRowsLayout = nullptr;
 
+    // Deck view headers
+    QLabel *frontHeaderLabel = nullptr;
+    QLabel *backHeaderLabel = nullptr;
+
     // Sidebar
-    CustomTreeWidget *deckTree;
-    QPushButton *addFolderBtn;
-    QPushButton *addDeckBtn;
-    QPushButton *randomDeckBtn;
-    QPushButton *libraryBtn;
-    QPushButton *folderBtn;
-    QPushButton *styleToggleBtn;
+    CustomTreeWidget *deckTree = nullptr;
+    QPushButton *addFolderBtn = nullptr;
+    QPushButton *addDeckBtn = nullptr;
+    QPushButton *randomDeckBtn = nullptr;
+    QPushButton *libraryBtn = nullptr;
+    QPushButton *folderBtn = nullptr;
+    QPushButton *styleToggleBtn = nullptr;
+    QLabel *countLabel = nullptr;
 
-    // Toolbar Actions
-    QAction *hamburgerAction;
-    QAction *settingsAction;
-    QAction *addCardAction;
-    QAction *saveDeckAction;
-    QAction *renameDeckAction;
-    QAction *deleteDeckAction;
-    QAction *duplicateDeckAction;
+    // Toolbar & Actions
+    QAction *hamburgerAction = nullptr;
+    QAction *settingsAction = nullptr;
+    QAction *addCardAction = nullptr;
+    QAction *saveDeckAction = nullptr;
+    QAction *renameDeckAction = nullptr;
+    QAction *deleteDeckAction = nullptr;
+    QAction *duplicateDeckAction = nullptr;
     QAction *resetMasteryAction = nullptr;
-    QAction *renameFolderAction;
-    QAction *deleteFolderAction;
-    QAction *duplicateFolderFullAction;
-    QAction *duplicateFolderEmptyAction;
-    QAction *folderSeparator1;
-    QAction *folderSeparator2;
-    QAction *deckSeparator1;
-    QAction *deckSeparator2;
-    QAction *endQuizAction;
-    QTreeWidgetItem* duplicateFolderStructureOnly(QTreeWidgetItem *source, QTreeWidgetItem *parent);
+    QAction *renameFolderAction = nullptr;
+    QAction *deleteFolderAction = nullptr;
+    QAction *duplicateFolderFullAction = nullptr;
+    QAction *duplicateFolderEmptyAction = nullptr;
 
-    // Data/State
+    QAction *folderSeparator1 = nullptr;
+    QAction *folderSeparator2 = nullptr;
+    QAction *deckSeparator1 = nullptr;
+    QAction *deckSeparator2 = nullptr;
+    QAction *endQuizAction = nullptr;
+
+    // Progress actions used in quiz toolbar
+    QAction *progressActionLeft = nullptr;
+    QAction *progressActionCenter = nullptr;
+    QAction *progressActionRight = nullptr;
+
+    // Data & State
     QString decksFilePath;
     QString settingsFilePath;
+
     QTreeWidgetItem *currentDeckItem = nullptr;
     bool deckIsDirty = false;
-    int dailyStreak;
+
+    int dailyStreak = 0;
     QDate lastStreakDate;
+
     int lastSidebarWidth = 320;
 
+    QString currentFrontHeader = "Question";
+    QString currentBackHeader  = "Answer";
+
+    // Drag & drop
     QWidget *draggedCard = nullptr;
     QWidget *dropPlaceholder = nullptr;
     QPoint dragOffset;
+
     MasteryRadial *deckMasteryRadial = nullptr;
 
     // Quiz Controls
     QPushButton *startQuizButton = nullptr;
     QPushButton *shuffleButton = nullptr;
     QSpinBox *numQuestionsSpinBox = nullptr;
+    QPushButton *directionButton = nullptr;
 
-    // Quiz State
-    bool inQuizMode = false;
-    bool isFlashcardMode = true;
-    bool cardFlipped = false;
-    bool answered = false;
-    int currentCardIndex = 0;
-    int score = 0;
-    bool isReviewMode = false;
-
-    // Quiz
+    // Quiz UI elements
     QWidget *quizWidget = nullptr;
     QWidget *resultsWidget = nullptr;
     QWidget *cardArea = nullptr;
     QWidget *actionArea = nullptr;
-    QLabel  *quizProgressLabel = nullptr;
-    QAction *progressActionLeft   = nullptr;
-    QAction *progressActionCenter = nullptr;
-    QAction *progressActionRight  = nullptr;
+    QLabel *quizProgressLabel = nullptr;
     QLabel *frontLabel = nullptr;
     QLabel *backLabel = nullptr;
     QLabel *feedbackLabel = nullptr;
@@ -162,10 +172,27 @@ private:
     QList<QPushButton*> choiceButtons;
     QList<QLabel*> choiceLabels;
     QWidget *choicesContainer = nullptr;
-    void onMultipleChoiceButtonClicked(QPushButton *clickedButton);
     QButtonGroup *quizStyleGroup = nullptr;
 
-    // Quiz Data
+    // Quiz State & Data
+    bool inQuizMode = false;
+    bool isFlashcardMode = true;
+    bool cardFlipped = false;
+    bool answered = false;
+    int currentCardIndex = 0;
+    int score = 0;
+    bool isReviewMode = false;
+
+    bool lastUsedFlashcardMode = true;
+    bool lastUsedShuffle = true;
+
+    enum class QuizDirection {
+        FrontToBack,
+        BackToFront
+    };
+    QuizDirection lastUsedQuizDirection = QuizDirection::FrontToBack;
+
+    // Quiz card lists
     QList<QPair<QString, QString>> quizCardList;
     QList<QPair<QPair<QString, QString>, int>> quizResults;
     QList<QPair<QString, QString>> reviewCardList;
@@ -173,18 +200,25 @@ private:
     bool useExactQuizCards = false;
     QStringList allDeckBacks;
 
-    bool lastUsedFlashcardMode = true;
-    bool lastUsedShuffle = true;
-
+    // Confirmation flags
     bool endQuizConfirmPending = false;
     bool deleteDeckConfirmPending = false;
     bool deleteFolderConfirmPending = false;
     bool resetMasteryConfirmPending = false;
 
-    // Helpers
+    // Settings
+    QString startOnLaunchType = "home";
+    QString startOnLaunchTarget = "";
+    bool isSettingsPage = false;
+    int masteryCorrectPoints;
+    int masteryIncorrectPoints;
+
+    // Private Helper Methods
     void loadDecks();
     QTreeWidgetItem* loadTreeItem(const QJsonObject &obj, QTreeWidgetItem *parent = nullptr);
     void saveTreeItem(QJsonArray &array, QTreeWidgetItem *item);
+    void migrateOldDeckHeaders();
+    void updateDirectionButtonText();
 
     // Deck View
     void showHomePage();
@@ -199,6 +233,7 @@ private:
     void updateToolbarActions();
     void updateSaveButtonState();
     void markDeckAsDirty();
+    void updateStartQuizButton();
 
     // Card Editor
     QWidget* createCardRow(const QString &front = "", const QString &back = "", int mastery = 0);
@@ -230,7 +265,7 @@ private:
     int getTotalCards();
     int getOverallMastery();
 
-    // Quiz
+    // Quiz Logic
     void startQuiz();
     void startGlobalQuiz(bool flashcardMode);
     void loadCurrentQuestion();
@@ -246,32 +281,32 @@ private:
     void startLibraryQuiz();
     void startFolderQuiz();
     void adjustCardFontSize(QLabel* label, const QString& text, bool isMultipleChoice = false);
+    void resetChoiceButtonStyles();
 
-    // Settings
+    // Settings & Misc
     void showSettingsPage();
     void showChangelog();
-    QString startOnLaunchType = "home";
-    QString startOnLaunchTarget = "";
     void resetAllMasteries();
     void deleteAllData();
     void populateFolderCombo(QComboBox* combo, QTreeWidgetItem* parent = nullptr, int depth = 0);
     void applyStartOnLaunch();
-    bool isSettingsPage;
 
-    // Drag/Drop
+    // Drag & Drop
     bool eventFilter(QObject *obj, QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
 
-    // Save/Load Settings
+    // Save / Load
     void saveSettings();
     void loadSettings();
 
-    // Context Menu/Actions
+    // Context Menu & Confirmations
     void showContextMenu(const QPoint &pos);
     void renameCurrentDeck();
     void renameCurrentFolder();
     void deleteCurrentDeck();
     void deleteCurrentFolder();
+    void confirmDeleteCurrentDeck();
+    void confirmDeleteCurrentFolder();
     void duplicateCurrentDeck();
     void duplicateFolderFull();
     void duplicateFolderEmpty();
@@ -282,9 +317,24 @@ private:
     void handleResetMasteryClick();
 
     void onMultipleChoiceSelected(QListWidgetItem *item);
+    void onMultipleChoiceButtonClicked(QPushButton *clickedButton);
 
+    // Tree duplication helpers
     QTreeWidgetItem* duplicateTreeItemRecursive(QTreeWidgetItem *source, QTreeWidgetItem *parent);
+    QTreeWidgetItem* duplicateFolderStructureOnly(QTreeWidgetItem *source, QTreeWidgetItem *parent);
 
+    // Card helpers
+    void setupCardTextEdit(QTextEdit* edit);
+
+    // Display helpers (quiz mode)
+    QString getDisplayedFront(const QPair<QString, QString>& card) const;
+    QString getDisplayedBack(const QPair<QString, QString>& card) const;
+
+    // Tree expansion helpers
+    void expandSubtree(QTreeWidgetItem *item);
+    void collapseSubtree(QTreeWidgetItem *item);
+
+    // Private Slots
 private slots:
     void toggleSidebar();
     void addNewFolder();
@@ -299,6 +349,7 @@ private slots:
     void showAboutDialog();
     void showFullLicense();
     void mergeImportedItem(const QJsonObject &importedObj, QTreeWidgetItem *targetParent);
+    void returnToPreviousLocation();
 };
 
 #endif

@@ -1,10 +1,10 @@
-# Flashcards by Ethan (v1.1)
+# Flashcards by Ethan (v1.2)
 
 **A clean, modern, and distraction-free flashcard + quiz app.**
 
-![License](https://img.shields.io/badge/License-GPLv3-blue.svg)
-![Qt](https://img.shields.io/badge/Qt-6.0+-green.svg)
-![Platform](https://img.shields.io/badge/Platform-Linux-orange.svg)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-orange.svg)
+![License](https://img.shields.io/badge/License-GPLv3-9C1C1C.svg)
+![Release](https://img.shields.io/github/v/release/ethan-mccall/flashcards-by-ethan?color=4CAF50)
 
 ---
 
@@ -43,7 +43,7 @@ sudo apt install -f
 ```
 To update an existing `.deb`, run:
 ```bash
-wget https://github.com/ethan-mccall/flashcards-by-ethan/releases/latest/download/flashcards-by-ethan_1.1_amd64.deb
+wget https://github.com/ethan-mccall/flashcards-by-ethan/releases/latest/download/flashcards-by-ethan_1.2_amd64.deb
 sudo dpkg -i flashcards-by-ethan_*.deb
 sudo apt install -f
 ```
@@ -57,7 +57,7 @@ sudo dpkg --purge flashcards-by-ethan
 ### Snap
 Download the latest `.snap` from the [Releases page](https://github.com/ethan-mccall/flashcards-by-ethan/releases) and run:
 ```bash
-sudo snap install flashcards-by-ethan_1.1_amd64.snap --dangerous
+sudo snap install flashcards-by-ethan_1.2_amd64.snap --dangerous
 ```
 ><h6>snap currently waiting in manual review.
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Flashcards VERSION 1.1 LANGUAGES CXX)
+project(Flashcards VERSION 1.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,7 +14,13 @@ qt_standard_project_setup()
 
 if(WIN32)
     enable_language(RC)
-    set(APP_ICON_RESOURCE_WINDOWS "${CMAKE_CURRENT_SOURCE_DIR}/windows/icon.rc")
+    set(ICON_RC "${CMAKE_CURRENT_SOURCE_DIR}/windows/icon.rc")
+
+    if(EXISTS "${ICON_RC}")
+        message(STATUS "Windows icon resource found: ${ICON_RC}")
+    else()
+        message(WARNING "Windows icon.rc not found at: ${ICON_RC}")
+    endif()
 endif()
 
 qt_add_executable(Flashcards
@@ -25,12 +31,13 @@ qt_add_executable(Flashcards
     snap/snapcraft.yaml
     snap/gui/flashcards-by-ethan.desktop
     README.md
-    ${APP_ICON_RESOURCE_WINDOWS}
 )
 
 # Windows Icon
-if(WIN32 AND APP_ICON_RESOURCE_WINDOWS)
-    set_source_files_properties(${APP_ICON_RESOURCE_WINDOWS} PROPERTIES
+if(WIN32 AND EXISTS "${ICON_RC}")
+    target_sources(Flashcards PRIVATE "${ICON_RC}")
+
+    set_source_files_properties("${ICON_RC}" PROPERTIES
         OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/Flashcards_autogen/mocs_compilation.cpp"
     )
 endif()

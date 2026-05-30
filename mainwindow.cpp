@@ -68,6 +68,7 @@ public:
         : QWidget(parent), m_value(0)
     {
         setFixedSize(size, size);
+        setMouseTracking(true);
     }
     void setValue(int value)
     {
@@ -101,27 +102,279 @@ private:
     }
 };
 
-CustomTreeWidget::CustomTreeWidget(QWidget *parent) : QTreeWidget(parent) {}
+class FlowLayout : public QLayout
+{
+public:
+    explicit FlowLayout(QWidget *parent, int margin = -1, int hSpacing = -1, int vSpacing = -1);
+    ~FlowLayout();
+
+    void addItem(QLayoutItem *item) override;
+    int horizontalSpacing() const;
+    int verticalSpacing() const;
+    Qt::Orientations expandingDirections() const override;
+    QSize sizeHint() const override;
+    QSize minimumSize() const override;
+    int count() const override;
+    QLayoutItem *itemAt(int index) const override;
+    QLayoutItem *takeAt(int index) override;
+    void setGeometry(const QRect &rect) override;
+
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override;
+
+    void setAlignment(Qt::Alignment alignment);
+    Qt::Alignment alignment() const { return m_alignment; }
+
+private:
+    int doLayout(const QRect &rect, bool testOnly) const;
+    int smartSpacing(QStyle::PixelMetric pm) const;
+
+    QList<QLayoutItem *> itemList;
+    int m_hSpace;
+    int m_vSpace;
+    Qt::Alignment m_alignment = Qt::AlignLeft;
+};
+
+FlowLayout::FlowLayout(QWidget *parent, int margin, int hSpacing, int vSpacing)
+    : QLayout(parent), m_hSpace(hSpacing), m_vSpace(vSpacing)
+{
+    setContentsMargins(margin, margin, margin, margin);
+}
+
+FlowLayout::~FlowLayout()
+{
+    qDeleteAll(itemList);
+}
+
+void FlowLayout::addItem(QLayoutItem *item)
+{
+    itemList.append(item);
+}
+
+int FlowLayout::horizontalSpacing() const
+{
+    if (m_hSpace >= 0) return m_hSpace;
+    return smartSpacing(QStyle::PM_LayoutHorizontalSpacing);
+}
+
+int FlowLayout::verticalSpacing() const
+{
+    if (m_vSpace >= 0) return m_vSpace;
+    return smartSpacing(QStyle::PM_LayoutVerticalSpacing);
+}
+
+Qt::Orientations FlowLayout::expandingDirections() const
+{
+    return Qt::Horizontal | Qt::Vertical;
+}
+
+int FlowLayout::heightForWidth(int width) const
+{
+    return doLayout(QRect(0, 0, width, 0), true);
+}
+
+QSize FlowLayout::sizeHint() const
+{
+    const int preferred = 620;
+
+    int w = preferred;
+    if (parentWidget())
+        w = qMin(w, parentWidget()->width());
+
+    return QSize(w, heightForWidth(w));
+}
+
+QSize FlowLayout::minimumSize() const
+{
+    if (itemList.isEmpty())
+        return QSize(0, 0);
+
+    int maxItemWidth = 0;
+    for (QLayoutItem *item : std::as_const(itemList)) {
+        maxItemWidth = qMax(maxItemWidth, item->minimumSize().width());
+    }
+
+    int left, top, right, bottom;
+    getContentsMargins(&left, &top, &right, &bottom);
+
+    int minW = maxItemWidth + left + right + horizontalSpacing() * 2;
+
+    return QSize(minW, heightForWidth(minW));
+}
+
+int FlowLayout::count() const { return itemList.size(); }
+
+QLayoutItem *FlowLayout::itemAt(int index) const { return itemList.value(index); }
+
+QLayoutItem *FlowLayout::takeAt(int index)
+{
+    if (index < 0 || index >= itemList.size()) return nullptr;
+    return itemList.takeAt(index);
+}
+
+void FlowLayout::setGeometry(const QRect &rect)
+{
+    QLayout::setGeometry(rect);
+    doLayout(rect, false);
+}
+
+int FlowLayout::doLayout(const QRect &rect, bool testOnly) const
+{
+    int left, top, right, bottom;
+    getContentsMargins(&left, &top, &right, &bottom);
+    QRect effectiveRect = rect.adjusted(+left, +top, -right, -bottom);
+
+    int x = effectiveRect.x();
+    int y = effectiveRect.y();
+    int lineHeight = 0;
+    int lineStartX = effectiveRect.x();
+    int lineItemCount = 0;
+    QList<QLayoutItem*> lineItems;
+
+    for (QLayoutItem *item : std::as_const(itemList)) {
+        QSize itemSize = item->sizeHint();
+        int spaceX = horizontalSpacing();
+        int spaceY = verticalSpacing();
+
+        int nextX = x + itemSize.width() + spaceX;
+
+        if (nextX - spaceX > effectiveRect.right() && lineHeight > 0) {
+            if (!testOnly && lineItemCount > 0) {
+                int totalWidth = x - lineStartX - spaceX;
+                int offset = (effectiveRect.width() - totalWidth) / 2;
+
+                int currentX = lineStartX + offset;
+                for (QLayoutItem *lineItem : lineItems) {
+                    QSize s = lineItem->sizeHint();
+                    lineItem->setGeometry(QRect(QPoint(currentX, y), s));
+                    currentX += s.width() + spaceX;
+                }
+            }
+
+            x = effectiveRect.x();
+            y = y + lineHeight + spaceY;
+            lineStartX = x;
+            lineItems.clear();
+            lineItemCount = 0;
+            nextX = x + itemSize.width() + spaceX;
+            lineHeight = 0;
+        }
+
+        if (!testOnly) {
+            lineItems.append(item);
+        }
+
+        x = nextX;
+        lineHeight = qMax(lineHeight, itemSize.height());
+        lineItemCount++;
+    }
+
+    if (!testOnly && lineItemCount > 0) {
+        int totalWidth = x - lineStartX - horizontalSpacing();
+        int offset = (effectiveRect.width() - totalWidth) / 2;
+
+        int currentX = lineStartX + offset;
+        for (QLayoutItem *lineItem : lineItems) {
+            QSize s = lineItem->sizeHint();
+            lineItem->setGeometry(QRect(QPoint(currentX, y), s));
+            currentX += s.width() + horizontalSpacing();
+        }
+    }
+
+    return y + lineHeight - rect.y() + bottom;
+}
+
+int FlowLayout::smartSpacing(QStyle::PixelMetric pm) const
+{
+    QObject *parent = this->parent();
+    if (!parent) return -1;
+    if (QWidget *pw = qobject_cast<QWidget*>(parent))
+        return pw->style()->pixelMetric(pm, nullptr, pw);
+    return -1;
+}
+
+void FlowLayout::setAlignment(Qt::Alignment alignment)
+{
+    m_alignment = alignment;
+    if (parentWidget())
+        parentWidget()->updateGeometry();
+}
+
+static void setCardText(QLabel* label, const QString& text)
+{
+    if (!label) return;
+    label->setTextFormat(Qt::PlainText);
+    label->setText(text);
+}
+
+void MainWindow::setupCardTextEdit(QTextEdit* edit)
+{
+    if (!edit) return;
+
+    edit->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    edit->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    edit->setWordWrapMode(QTextOption::WordWrap);
+    edit->setMinimumHeight(68);
+    edit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+    connect(edit, &QTextEdit::textChanged, this, [edit]() {
+        QTextDocument* doc = edit->document();
+        int newHeight = static_cast<int>(doc->size().height()) + 12;
+        newHeight = qBound(68, newHeight, 240);
+        if (edit->height() != newHeight) {
+            edit->setFixedHeight(newHeight);
+            if (edit->parentWidget())
+                edit->parentWidget()->updateGeometry();
+        }
+    });
+}
+
+CustomTreeWidget::CustomTreeWidget(QWidget *parent)
+    : QTreeWidget(parent)
+{
+}
+
+void CustomTreeWidget::dropEvent(QDropEvent *event)
+{
+    QTreeWidgetItem *targetItem = itemAt(event->position().toPoint());
+    if (targetItem && targetItem->data(0, Qt::UserRole).toString() == "deck") {
+        event->ignore();
+        return;
+    }
+    QTreeWidget::dropEvent(event);
+}
+
+void CustomTreeWidget::dragMoveEvent(QDragMoveEvent *event)
+{
+    QTreeWidgetItem *targetItem = itemAt(event->position().toPoint());
+    if (targetItem && targetItem->data(0, Qt::UserRole).toString() == "deck") {
+        event->ignore();
+        return;
+    }
+    QTreeWidget::dragMoveEvent(event);
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
+    // Core state
     , isFlashcardMode(false)
-    , choicesContainer(nullptr)
-    , score(0)
-    , choiceListWidget(nullptr)
-    , prevButton(nullptr)
-    , quizResults()
+    , inQuizMode(false)
     , isReviewMode(false)
-    , reviewCardList()
-    , quizCardList()
-    , currentCardIndex(0)
+    , isSettingsPage(false)
+    , deckIsDirty(false)
     , cardFlipped(false)
     , answered(false)
-    , inQuizMode(false)
+    , currentCardIndex(0)
+    , score(0)
+    , dailyStreak(0)
+
+    // Pointers
+    , choicesContainer(nullptr)
+    , choiceListWidget(nullptr)
+    , prevButton(nullptr)
     , cardArea(nullptr)
     , actionArea(nullptr)
     , currentDeckItem(nullptr)
-    , deckIsDirty(false)
     , draggedCard(nullptr)
     , dropPlaceholder(nullptr)
     , startQuizButton(nullptr)
@@ -130,18 +383,39 @@ MainWindow::MainWindow(QWidget *parent)
     , wrongButton(nullptr)
     , ratingContainer(nullptr)
     , numQuestionsSpinBox(nullptr)
-    , allDeckBacks()
-    , dailyStreak(0)
-    , lastStreakDate()
-    , choiceButtons()
-    , choiceLabels()
-    , isSettingsPage(false)
+    , quizWidget(nullptr)
+    , resultsWidget(nullptr)
+    , frontLabel(nullptr)
+    , backLabel(nullptr)
+    , feedbackLabel(nullptr)
+    , actionButton(nullptr)
+    , nextButton(nullptr)
+    , cardRowsLayout(nullptr)
+    , cardContainer(nullptr)
+    , quizStyleGroup(nullptr)
     , randomDeckBtn(nullptr)
     , libraryBtn(nullptr)
     , folderBtn(nullptr)
     , styleToggleBtn(nullptr)
+
+    // Containers
+    , quizResults()
+    , reviewCardList()
+    , quizCardList()
+    , allDeckBacks()
+    , choiceButtons()
+    , choiceLabels()
+    , lastStreakDate()
+
+    // Mastery Settings
+    , masteryCorrectPoints(8)
+    , masteryIncorrectPoints(-6)
+
+    // Last Used Quiz Preferences
+    , lastUsedFlashcardMode(true)
+    , lastUsedShuffle(true)
+    , lastUsedQuizDirection(QuizDirection::FrontToBack)
 {
-    setWindowTitle("Flashcards");
     inQuizMode = false;
     quizWidget = nullptr;
     resultsWidget = nullptr;
@@ -153,8 +427,10 @@ MainWindow::MainWindow(QWidget *parent)
     cardRowsLayout = nullptr;
     cardContainer = nullptr;
     quizStyleGroup = nullptr;
+
     lastUsedFlashcardMode = true;
     lastUsedShuffle = true;
+    lastUsedQuizDirection = QuizDirection::FrontToBack;
 
     // Top Navigation Bar
     navToolBar = addToolBar("Navigation");
@@ -232,8 +508,41 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Left Panel
     sidePanel = new QWidget();
+    sidePanel->setObjectName("sidePanel");
     sidePanel->setMinimumWidth(60);
-    sidePanel->setStyleSheet("background-color: #2c3e50; color: white; padding: 8px;");
+    sidePanel->setStyleSheet(R"(
+        #sidePanel {
+            background-color: #2c3e50;
+            color: white;
+            padding: 8px;
+        }
+
+        #sidePanel QScrollBar:vertical,
+        #sidePanel QScrollBar:horizontal {
+            background-color: #2c3e50;
+            border: none;
+            margin: 0px;
+        }
+        #sidePanel QScrollBar:vertical { width: 16px; }
+        #sidePanel QScrollBar:horizontal { height: 14px; }
+
+        #sidePanel QScrollBar::handle:vertical,
+        #sidePanel QScrollBar::handle:horizontal {
+            background-color: #3498db;
+            border-radius: 8px;
+            min-height: 40px;
+            min-width: 40px;
+        }
+        #sidePanel QTreeWidget QLineEdit {
+            background-color: #2c3e50;
+            color: white;
+            border: 2px solid #3498db;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 20px;
+            selection-background-color: #2980b9;
+        }
+    )");
     QVBoxLayout *sideLayout = new QVBoxLayout(sidePanel);
     sideLayout->setSpacing(8);
     sideLayout->setContentsMargins(8, 8, 8, 8);
@@ -392,7 +701,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     setCentralWidget(splitter);
     updateAddButtonsState();
-    resize(1500, 1000);
+    resize(1510, 1000);
 
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dataDir);
@@ -400,6 +709,7 @@ MainWindow::MainWindow(QWidget *parent)
     settingsFilePath = dataDir + "/settings.json";
 
     loadDecks();
+    migrateOldDeckHeaders();
     connect(deckTree, &QTreeWidget::itemExpanded,  this, &MainWindow::saveDecks);
     connect(deckTree, &QTreeWidget::itemCollapsed, this, &MainWindow::saveDecks);
     loadSettings();
@@ -407,6 +717,54 @@ MainWindow::MainWindow(QWidget *parent)
     checkDailyStreakAtLaunch();
 
     applyStartOnLaunch();
+
+    qApp->setStyleSheet(R"(
+        QToolTip {
+            background-color: #34495e;
+            color: white;
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            padding: 2px 2px;
+            font-size: 15px;
+            font-weight: bold;
+        }
+        QScrollBar:vertical {
+            background: #2c3e50;
+            width: 14px;
+            margin: 0px;
+        }
+        QScrollBar::handle:vertical {
+            background: #3498db;
+            border-radius: 7px;
+            min-height: 30px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #2980b9;
+        }
+        QScrollBar:horizontal {
+            background: #2c3e50;
+            height: 14px;
+            margin: 0px;
+        }
+        QScrollBar::handle:horizontal {
+            background: #3498db;
+            border-radius: 7px;
+            min-width: 30px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background: #2980b9;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            height: 0px;
+            width: 0px;
+            background: none;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: none;
+        }
+    )");
 }
 
 void MainWindow::addNewFolder()
@@ -449,7 +807,7 @@ void MainWindow::addNewDeckFromButton()
     newItem->setIcon(0, QIcon::fromTheme("document-edit"));
     newItem->setData(0, Qt::UserRole, "deck");
     newItem->setData(0, Qt::UserRole + 2, QDateTime::currentDateTime().toString(Qt::ISODate));
-    newItem->setFlags(newItem->flags() | Qt::ItemIsEditable);
+    newItem->setFlags(newItem->flags() | Qt::ItemIsEditable | Qt::ItemNeverHasChildren);
 
     deckTree->setCurrentItem(newItem);
     deckTree->editItem(newItem, 0);
@@ -468,8 +826,10 @@ void MainWindow::showContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *item = deckTree->itemAt(pos);
     if (!item) return;
+
     QString type = item->data(0, Qt::UserRole).toString();
     QMenu contextMenu(this);
+
     if (type == "folder") {
         QAction *renameF = contextMenu.addAction(QIcon::fromTheme("edit-rename"), "Rename Folder");
         connect(renameF, &QAction::triggered, this, &MainWindow::renameCurrentFolder);
@@ -480,12 +840,16 @@ void MainWindow::showContextMenu(const QPoint &pos)
         connect(dupEmpty, &QAction::triggered, this, &MainWindow::duplicateFolderEmpty);
         contextMenu.addSeparator();
         QAction *expandAll = contextMenu.addAction(QIcon::fromTheme("expand-all"), "Expand All");
-        connect(expandAll, &QAction::triggered, deckTree, &QTreeWidget::expandAll);
+        connect(expandAll, &QAction::triggered, this, [this, item]() {
+            expandSubtree(item);
+        });
         QAction *collapseAll = contextMenu.addAction(QIcon::fromTheme("collapse-all"), "Collapse All");
-        connect(collapseAll, &QAction::triggered, deckTree, &QTreeWidget::collapseAll);
+        connect(collapseAll, &QAction::triggered, this, [this, item]() {
+            collapseSubtree(item);
+        });
         contextMenu.addSeparator();
         QAction *delF = contextMenu.addAction(QIcon::fromTheme("edit-delete"), "Delete Folder");
-        connect(delF, &QAction::triggered, this, &MainWindow::deleteCurrentFolder);
+        connect(delF, &QAction::triggered, this, &MainWindow::confirmDeleteCurrentFolder);
     } else {
         QAction *renameD = contextMenu.addAction(QIcon::fromTheme("edit-rename"), "Rename Deck");
         connect(renameD, &QAction::triggered, this, &MainWindow::renameCurrentDeck);
@@ -493,7 +857,7 @@ void MainWindow::showContextMenu(const QPoint &pos)
         connect(dupD, &QAction::triggered, this, &MainWindow::duplicateCurrentDeck);
         contextMenu.addSeparator();
         QAction *delD = contextMenu.addAction(QIcon::fromTheme("edit-delete"), "Delete Deck");
-        connect(delD, &QAction::triggered, this, &MainWindow::deleteCurrentDeck);
+        connect(delD, &QAction::triggered, this, &MainWindow::confirmDeleteCurrentDeck);
     }
     contextMenu.exec(deckTree->viewport()->mapToGlobal(pos));
 }
@@ -532,6 +896,18 @@ void MainWindow::saveTreeItem(QJsonArray &array, QTreeWidgetItem *item)
             obj["cards"] = cardsVar.toJsonArray();
         }
         obj["lastQuiz"] = item->data(0, Qt::UserRole + 2).toString();
+
+        int prefNum = item->data(0, Qt::UserRole + 3).toInt(0);
+        if (prefNum > 0) {
+            obj["preferredNumQuestions"] = prefNum;
+        }
+        if (item == currentDeckItem) {
+            obj["frontHeader"] = currentFrontHeader;
+            obj["backHeader"]  = currentBackHeader;
+        } else {
+            obj["frontHeader"] = item->data(0, Qt::UserRole + 4).toString();
+            obj["backHeader"]  = item->data(0, Qt::UserRole + 5).toString();
+        }
     }
     else if (item->data(0, Qt::UserRole).toString() == "folder") {
         obj["expanded"] = item->isExpanded();
@@ -559,6 +935,15 @@ QTreeWidgetItem* MainWindow::loadTreeItem(const QJsonObject &obj, QTreeWidgetIte
             item->setData(0, Qt::UserRole + 1, obj["cards"].toArray());
         }
         item->setData(0, Qt::UserRole + 2, obj.value("lastQuiz").toString());
+
+        if (obj.contains("preferredNumQuestions")) {
+            item->setData(0, Qt::UserRole + 3, obj["preferredNumQuestions"].toInt());
+        }
+        item->setFlags(item->flags() | Qt::ItemIsEditable | Qt::ItemNeverHasChildren);
+        if (obj.contains("frontHeader"))
+            item->setData(0, Qt::UserRole + 4, obj["frontHeader"].toString());
+        if (obj.contains("backHeader"))
+            item->setData(0, Qt::UserRole + 5, obj["backHeader"].toString());
     }
     else if (type == "folder") {
         item->setIcon(0, QIcon::fromTheme("folder"));
@@ -589,6 +974,30 @@ QTreeWidgetItem* MainWindow::loadTreeItem(const QJsonObject &obj, QTreeWidgetIte
     return item;
 }
 
+void MainWindow::migrateOldDeckHeaders()
+{
+    QList<QTreeWidgetItem*> allDecks = collectDecksRecursive(deckTree->invisibleRootItem());
+    bool needsSave = false;
+
+    for (QTreeWidgetItem *deck : allDecks) {
+        QString front = deck->data(0, Qt::UserRole + 4).toString().trimmed();
+        QString back  = deck->data(0, Qt::UserRole + 5).toString().trimmed();
+
+        if (front.isEmpty()) {
+            deck->setData(0, Qt::UserRole + 4, "Question");
+            needsSave = true;
+        }
+        if (back.isEmpty()) {
+            deck->setData(0, Qt::UserRole + 5, "Answer");
+            needsSave = true;
+        }
+    }
+
+    if (needsSave) {
+        saveDecks();
+    }
+}
+
 void MainWindow::loadDecks()
 {
     QFile file(decksFilePath);
@@ -602,7 +1011,7 @@ void MainWindow::loadDecks()
         exampleDeck->setIcon(0, QIcon::fromTheme("document-edit"));
         exampleDeck->setData(0, Qt::UserRole, "deck");
         exampleDeck->setData(0, Qt::UserRole + 2, QDateTime::currentDateTime().toString(Qt::ISODate));
-        exampleDeck->setFlags(exampleDeck->flags() | Qt::ItemIsEditable);
+        exampleDeck->setFlags(exampleDeck->flags() | Qt::ItemIsEditable | Qt::ItemNeverHasChildren);
         rootFolder->setExpanded(true);
         deckTree->expandAll();
         return;
@@ -628,19 +1037,29 @@ void MainWindow::onDeckSelectionChanged()
         if (isSwitching) {
             if (!confirmExitQuiz()) {
                 QSignalBlocker blocker(deckTree);
-                if (currentDeckItem) {
-                    deckTree->setCurrentItem(currentDeckItem);
-                } else {
-                    deckTree->clearSelection();
-                }
+                if (currentDeckItem) deckTree->setCurrentItem(currentDeckItem);
+                else deckTree->clearSelection();
                 return;
             }
+
             endQuiz();
+
+            selected = deckTree->currentItem();
+            if (selected && selected->data(0, Qt::UserRole).toString() == "deck") {
+                currentDeckItem = selected;
+                showDeckContent(selected);
+            } else {
+                currentDeckItem = nullptr;
+                showHomePage();
+            }
+
+            updateAddButtonsState();
+            updateToolbarActions();
+            return;
         }
     }
 
     QTreeWidgetItem *selected = deckTree->currentItem();
-    updateAddButtonsState();
 
     if (selected && selected->data(0, Qt::UserRole).toString() == "deck") {
         if (selected != currentDeckItem) {
@@ -651,73 +1070,82 @@ void MainWindow::onDeckSelectionChanged()
         currentDeckItem = nullptr;
         showHomePage();
     }
+
+    updateAddButtonsState();
     updateToolbarActions();
 }
 
 void MainWindow::resetMainContent()
 {
-    isSettingsPage = false;
-    inQuizMode = false;
-    currentCardIndex = 0;
-    cardRowsLayout = nullptr;
-    cardContainer = nullptr;
-    correctButton = nullptr;
-    wrongButton = nullptr;
-    ratingContainer = nullptr;
-    startQuizButton = nullptr;
-    shuffleButton = nullptr;
-    numQuestionsSpinBox = nullptr;
-    allDeckBacks.clear();
+    if (currentDeckItem) {
+        if (deckTree->indexOfTopLevelItem(currentDeckItem) == -1 &&
+            !currentDeckItem->parent()) {
+            currentDeckItem = nullptr;
+        }
+    }
+
     frontLabel = nullptr;
     backLabel = nullptr;
     feedbackLabel = nullptr;
     actionButton = nullptr;
     nextButton = nullptr;
     prevButton = nullptr;
+    directionButton = nullptr;
+
     cardArea = nullptr;
     actionArea = nullptr;
-    choiceButtons.clear();
     choicesContainer = nullptr;
     choiceListWidget = nullptr;
+    ratingContainer = nullptr;
+    startQuizButton = nullptr;
+    shuffleButton = nullptr;
+    numQuestionsSpinBox = nullptr;
+    deckMasteryRadial = nullptr;
+    quizStyleGroup = nullptr;
+
+    quizWidget = nullptr;
+    resultsWidget = nullptr;
+    currentDeckContainer = nullptr;
+
+    cardRowsLayout = nullptr;
+    cardContainer = nullptr;
+
+    correctButton = nullptr;
+    wrongButton = nullptr;
+
+    choiceButtons.clear();
     choiceLabels.clear();
-    score = 0;
+    allDeckBacks.clear();
+
+    if (mainContentLayout) {
+        QLayoutItem *item;
+        while ((item = mainContentLayout->takeAt(0)) != nullptr) {
+            if (QWidget *w = item->widget()) {
+                w->hide();
+                w->setParent(nullptr);
+                w->deleteLater();
+            }
+            delete item;
+        }
+    }
 
     if (progressActionLeft)   { navToolBar->removeAction(progressActionLeft);   progressActionLeft = nullptr; }
     if (progressActionCenter) { navToolBar->removeAction(progressActionCenter); progressActionCenter = nullptr; }
     if (progressActionRight)  { navToolBar->removeAction(progressActionRight);  progressActionRight = nullptr; }
+
     if (quizProgressLabel) {
         quizProgressLabel->deleteLater();
         quizProgressLabel = nullptr;
     }
 
-    if (deckMasteryRadial) {
-        delete deckMasteryRadial;
-        deckMasteryRadial = nullptr;
-    }
-    if (quizStyleGroup) {
-        delete quizStyleGroup;
-        quizStyleGroup = nullptr;
-    }
-    if (quizWidget) {
-        delete quizWidget;
-        quizWidget = nullptr;
-    }
-    if (resultsWidget) {
-        delete resultsWidget;
-        resultsWidget = nullptr;
-    }
-    if (currentDeckContainer) {
-        delete currentDeckContainer;
-        currentDeckContainer = nullptr;
-    }
+    QCoreApplication::processEvents();
 
-    QLayoutItem *item;
-    while ((item = mainContentLayout->takeAt(0)) != nullptr) {
-        if (item->widget())
-            item->widget()->deleteLater();
-        delete item;
-    }
+    isSettingsPage = false;
+    inQuizMode = false;
+    currentCardIndex = 0;
+    score = 0;
 
+    resultsWidget = nullptr;
     updateToolbarActions();
 }
 
@@ -731,7 +1159,10 @@ void MainWindow::clearMainContent()
 void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
 {
     if (!deckItem) return;
+    if (inQuizMode) return;
+
     resetMainContent();
+
     currentDeckContainer = new QWidget();
     currentDeckContainer->setStyleSheet("background-color: #4a5259;");
     QVBoxLayout *deckLayout = new QVBoxLayout(currentDeckContainer);
@@ -740,221 +1171,192 @@ void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
 
     QWidget *topArea = new QWidget();
     topArea->setStyleSheet("background-color: #2c3e50; border-radius: 8px; padding: 15px 0px 0px 15px;");
+    topArea->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
     QVBoxLayout *topVL = new QVBoxLayout(topArea);
     topVL->setSpacing(16);
 
-    // Title Row
     QHBoxLayout *titleRow = new QHBoxLayout();
     titleRow->setSpacing(16);
     titleRow->setContentsMargins(0, 0, 0, 0);
+
     QWidget *radialContainer = new QWidget(topArea);
     QVBoxLayout *radialL = new QVBoxLayout(radialContainer);
     radialL->setContentsMargins(10, 10, 0, 0);
     radialL->setSpacing(0);
     radialL->setAlignment(Qt::AlignTop);
+
     deckMasteryRadial = new MasteryRadial(radialContainer, 72);
     deckMasteryRadial->setValue(getDeckAverageMastery(deckItem));
     deckMasteryRadial->setToolTip(QString("Deck Mastery: %1%").arg(deckMasteryRadial->value()));
+    deckMasteryRadial->setStyleSheet(R"(
+        QToolTip {
+            background-color: #34495e;
+            color: white;
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            padding: 2px 2px;
+            font-size: 15px;
+            font-weight: bold;
+        }
+    )");
     radialL->addWidget(deckMasteryRadial);
 
     QLabel *deckTitle = new QLabel(deckItem->text(0), topArea);
     deckTitle->setWordWrap(true);
     deckTitle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     deckTitle->setStyleSheet("font-size: 28px; font-weight: bold; color: white; line-height: 1.25;");
+
     int cardCount = currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray().size();
-    QLabel *countLabel = new QLabel(QString("%1 cards").arg(cardCount), topArea);
+    countLabel = new QLabel(QString("%1 cards").arg(cardCount), topArea);
     countLabel->setStyleSheet("font-size: 16px; color: #bdc3c7;");
     countLabel->setContentsMargins(0, 0, 15, 0);
+
     titleRow->addWidget(radialContainer, 0, Qt::AlignTop);
     titleRow->addWidget(deckTitle, 1);
     titleRow->addStretch();
     titleRow->addWidget(countLabel, 0, Qt::AlignTop);
     topVL->addLayout(titleRow);
 
-    // Quiz Controls
-    QHBoxLayout *quizRow = new QHBoxLayout();
-    quizRow->setSpacing(12);
-    quizRow->setContentsMargins(0, 0, 0, 0);
-    quizRow->addSpacing(18);
+    QWidget *quizControlsContainer = new QWidget(topArea);
+    FlowLayout *flowLayout = new FlowLayout(quizControlsContainer, 0, 12, 10);
+    quizControlsContainer->setLayout(flowLayout);
+    quizControlsContainer->setMinimumWidth(0);
+    flowLayout->setAlignment(Qt::AlignHCenter);
+    quizControlsContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    flowLayout->setContentsMargins(18, 0, 0, 0);
 
     // Start Quiz Button
     startQuizButton = new QPushButton("Start Quiz", topArea);
-    startQuizButton->setFixedWidth(150);
+    startQuizButton->setFixedWidth(190);
     startQuizButton->setFixedHeight(50);
     startQuizButton->setStyleSheet(R"(
-        QPushButton {
-            background-color: #3498db;
-            color: white;
-            padding: 14px 24px;
-            font-size: 15px;
-            font-weight: bold;
-            border-radius: 10px;
-            border: none;
-            min-width: 160px;
-        }
-        QPushButton:hover {
-            background-color: #2980b9;
-            border: 2px solid white;
-        }
-        QPushButton:disabled {
-            background-color: #7f8c8d;
-            color: #bdc3c7;
-        }
+        QPushButton { background-color: #3498db; color: white; padding: 14px 24px;
+                      font-size: 15px; font-weight: bold; border-radius: 10px;
+                      border: none; }
+        QPushButton:hover { background-color: #2980b9; border: 2px solid white; }
+        QPushButton:disabled { background-color: #7f8c8d; color: #bdc3c7; }
     )");
-
     auto updateStartButton = [this]() {
         if (!startQuizButton) return;
-        int cardCount = currentDeckItem ?
-                            currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray().size() : 0;
-
+        int cc = currentDeckItem ? currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray().size() : 0;
         bool isMCQ = !lastUsedFlashcardMode;
-        bool enabled = (cardCount > 0) && !(isMCQ && cardCount == 1);
-        startQuizButton->setEnabled(enabled);
+        startQuizButton->setEnabled((cc > 0) && !(isMCQ && cc == 1));
     };
-
     updateStartButton();
     connect(startQuizButton, &QPushButton::clicked, this, &MainWindow::startQuiz);
-
-    //startQuizButton->setEnabled(cardCount > 0);
 
     // Quiz Type Button
     QPushButton *quizTypeBtn = new QPushButton(topArea);
     quizTypeBtn->setCheckable(true);
     quizTypeBtn->setChecked(lastUsedFlashcardMode);
     quizTypeBtn->setText(lastUsedFlashcardMode ? "Flashcard Style" : "Multiple Choice");
-    quizTypeBtn->setFixedWidth(200);
+    quizTypeBtn->setFixedWidth(190);
     quizTypeBtn->setFixedHeight(50);
     quizTypeBtn->setStyleSheet(R"(
-        QPushButton {
-            background-color: #27ae60;
-            color: white;
-            padding: 14px 24px;
-            font-size: 15px;
-            font-weight: bold;
-            border-radius: 10px;
-            border: none;
-            min-width: 180px;
-        }
-        QPushButton:hover {
-            border: 2px solid #ffffff;
-        }
+        QPushButton { background-color: #27ae60; color: white; padding: 14px 24px;
+                      font-size: 15px; font-weight: bold; border-radius: 10px;
+                      border: none; }
+        QPushButton:hover { border: 2px solid #ffffff; }
     )");
     connect(quizTypeBtn, &QPushButton::clicked, this, [this, quizTypeBtn, updateStartButton](bool checked) {
         lastUsedFlashcardMode = checked;
         quizTypeBtn->setText(checked ? "Flashcard Style" : "Multiple Choice");
         saveSettings();
-        updateStartButton();
+        updateStartQuizButton();
     });
 
     // Shuffle Button
     shuffleButton = new QPushButton("Shuffle", topArea);
-    shuffleButton->setFixedWidth(200);
+    shuffleButton->setFixedWidth(190);
     shuffleButton->setFixedHeight(50);
     shuffleButton->setCheckable(true);
     shuffleButton->setChecked(lastUsedShuffle);
     shuffleButton->setStyleSheet(R"(
-        QPushButton {
-            background-color: #2c3e50;
-            color: white;
-            padding: 14px 24px;
-            font-size: 15px;
-            font-weight: bold;
-            border-radius: 10px;
-            border: 2px solid #455a6f;
-            min-width: 140px;
-        }
-        QPushButton:checked {
-            background-color: #27ae60;
-            border: none;
-        }
-        QPushButton:hover {
-            border: 2px solid #3498db;
-        }
-        QPushButton:checked:hover {
-            border: 2px solid #ffffff;
-        }
+        QPushButton { background-color: #2c3e50; color: white; padding: 14px 24px;
+                      font-size: 15px; font-weight: bold; border-radius: 10px;
+                      border: 2px solid #455a6f; }
+        QPushButton:checked { background-color: #27ae60; border: none; }
+        QPushButton:hover { border: 2px solid #3498db; }
+        QPushButton:checked:hover { border: 2px solid #ffffff; }
     )");
     connect(shuffleButton, &QPushButton::toggled, this, [this](bool checked) {
         lastUsedShuffle = checked;
         saveSettings();
     });
 
+    // Direction Button
+    directionButton = new QPushButton(topArea);
+    directionButton->setFixedWidth(190);
+    directionButton->setFixedHeight(50);
+    directionButton->setCheckable(false);
+    updateDirectionButtonText();
+    connect(directionButton, &QPushButton::clicked, this, [this]() {
+        lastUsedQuizDirection = (lastUsedQuizDirection == QuizDirection::FrontToBack)
+        ? QuizDirection::BackToFront : QuizDirection::FrontToBack;
+        updateDirectionButtonText();
+        saveSettings();
+    });
+
     // Number of Questions
+    QWidget *questionsGroup = new QWidget(topArea);
+    QHBoxLayout *qLayout = new QHBoxLayout(questionsGroup);
+    qLayout->setContentsMargins(0, 0, 0, 0);
+    qLayout->setSpacing(3);
+
     QLabel *numLabel = new QLabel("Questions:", topArea);
     numLabel->setStyleSheet("color: #bdc3c7; font-size: 15px; font-weight: bold; padding: 14px 4px;");
+    flowLayout->addWidget(numLabel);
 
     numQuestionsSpinBox = new QSpinBox(topArea);
     numQuestionsSpinBox->setMinimum(1);
     numQuestionsSpinBox->setMaximum(9999);
-    numQuestionsSpinBox->setValue(cardCount);
-    numQuestionsSpinBox->setFixedWidth(88);
+    numQuestionsSpinBox->setFixedWidth(90);
+    numQuestionsSpinBox->setMinimumHeight(50);
+    numQuestionsSpinBox->setAlignment(Qt::AlignCenter);
     numQuestionsSpinBox->setStyleSheet(R"(
-        QSpinBox {
-            background-color: #2c3e50;
-            color: white;
-            border: 2px solid #455a6f;
-            border-radius: 10px;
-            padding: 6px 30px 6px 8px;
-            font-size: 15px;
-            font-weight: bold;
-        }
-        QSpinBox:hover {
-            border: 2px solid #3498db;
-        }
-
-        /* Arrow buttons */
-        QSpinBox::up-button {
-            width: 25px;
-            background-color: #34495e;
-            border: none;
-            border-top-right-radius: 5px;
-        }
-        QSpinBox::down-button {
-            width: 25px;
-            background-color: #34495e;
-            border: none;
-            border-bottom-right-radius: 5px;
-        }
-        QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-            background-color: #3498db;
-        }
-
-        /* === YOUR ARROWS (solid sides) === */
-        QSpinBox::up-arrow {
-            border-left: 6px solid #34495e;
-            border-right: 6px solid #34495e;
-            border-bottom: 8px solid #bdc3c7;
-            width: 0px;
-            height: 0px;
-        }
-        QSpinBox::down-arrow {
-            border-left: 6px solid #34495e;
-            border-right: 6px solid #34495e;
-            border-top: 8px solid #bdc3c7;
-            width: 0px;
-            height: 0px;
-        }
-
-        /* Hover color override — this works reliably */
-        QSpinBox::up-arrow:hover {
-            border-left: 6px solid #3498db;
-            border-right: 6px solid #3498db;
-        }
-        QSpinBox::down-arrow:hover {
-            border-left: 6px solid #3498db;
-            border-right: 6px solid #3498db;
-        }
+        QSpinBox { background-color: #2c3e50; color: white; border: 2px solid #455a6f;
+                   border-radius: 10px; padding: 6px 8px; font-size: 15px; font-weight: bold; }
+        QSpinBox:hover { border: 2px solid #3498db; }
+        QSpinBox::up-button { width: 25px; background-color: #34495e; border: none; border-top-right-radius: 8px; }
+        QSpinBox::down-button { width: 25px; background-color: #34495e; border: none; border-bottom-right-radius: 8px; }
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover { background-color: #3498db; }
+        QSpinBox::up-arrow { border-left:6px solid #34495e; border-right:6px solid #34495e; border-bottom:8px solid #bdc3c7; width:0; height:0; }
+        QSpinBox::down-arrow { border-left:6px solid #34495e; border-right:6px solid #34495e; border-top:8px solid #bdc3c7; width:0; height:0; }
+        QSpinBox::up-arrow:hover, QSpinBox::down-arrow:hover { border-left:6px solid #3498db; border-right:6px solid #3498db; }
     )");
 
-    quizRow->addWidget(startQuizButton);
-    quizRow->addWidget(quizTypeBtn);
-    quizRow->addWidget(shuffleButton);
-    quizRow->addWidget(numLabel);
-    quizRow->addWidget(numQuestionsSpinBox);
-    quizRow->addStretch();
+    int preferredNum = currentDeckItem->data(0, Qt::UserRole + 3).toInt(0);
+    numQuestionsSpinBox->setValue(preferredNum > 0 ? preferredNum : (cardCount > 0 ? cardCount : 10));
 
-    topVL->addLayout(quizRow);
+    connect(numQuestionsSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int value) {
+                if (!currentDeckItem) return;
+                QSignalBlocker blocker(deckTree);
+                currentDeckItem->setData(0, Qt::UserRole + 3, value);
+                QTimer::singleShot(30, this, [this]() { saveDecks(); });
+            });
+
+    flowLayout->addWidget(startQuizButton);
+    flowLayout->addWidget(quizTypeBtn);
+    flowLayout->addWidget(shuffleButton);
+    flowLayout->addWidget(directionButton);
+    qLayout->addWidget(numLabel);
+    qLayout->addWidget(numQuestionsSpinBox);
+    flowLayout->addWidget(questionsGroup);
+
+    topVL->addWidget(quizControlsContainer);
     topVL->addSpacing(16);
+
+    QTimer::singleShot(0, this, [quizControlsContainer, topArea, topVL, flowLayout]() {
+        flowLayout->invalidate();
+        quizControlsContainer->updateGeometry();
+        topVL->invalidate();
+        topVL->activate();
+        topArea->updateGeometry();
+        topArea->adjustSize();
+    });
+
     deckLayout->addWidget(topArea);
 
     // Flashcard Section
@@ -966,14 +1368,49 @@ void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
 
     QHBoxLayout *headerL = new QHBoxLayout();
     headerL->setSpacing(12);
-    headerL->setContentsMargins(12, 0, 12, 0);
-    headerL->addSpacing(50);
-    QLabel *qLabel = new QLabel("Question", bottomArea);
-    QLabel *aLabel = new QLabel("Answer", bottomArea);
-    qLabel->setStyleSheet("font-weight: bold; font-size: 17px; color: white;");
-    aLabel->setStyleSheet("font-weight: bold; font-size: 17px; color: white;");
-    qLabel->setAlignment(Qt::AlignCenter);
-    aLabel->setAlignment(Qt::AlignCenter);
+    headerL->setContentsMargins(64, 0, 12, 0);
+
+    currentFrontHeader = "Question";
+    currentBackHeader  = "Answer";
+
+    QVariant frontHeaderVar = deckItem->data(0, Qt::UserRole + 4);
+    QVariant backHeaderVar  = deckItem->data(0, Qt::UserRole + 5);
+    if (frontHeaderVar.isValid()) currentFrontHeader = frontHeaderVar.toString();
+    if (backHeaderVar.isValid())  currentBackHeader  = backHeaderVar.toString();
+
+    QLineEdit *frontHeaderEdit = new QLineEdit(currentFrontHeader, bottomArea);
+    QLineEdit *backHeaderEdit  = new QLineEdit(currentBackHeader, bottomArea);
+
+    frontHeaderEdit->setFrame(false);
+    backHeaderEdit->setFrame(false);
+    frontHeaderEdit->setAlignment(Qt::AlignCenter);
+    backHeaderEdit->setAlignment(Qt::AlignCenter);
+
+    frontHeaderEdit->setStyleSheet(R"(
+        QLineEdit {
+            background: transparent;
+            color: white;
+            font-size: 17px;
+            font-weight: bold;
+            border: none;
+            padding: 4px;
+        }
+        QLineEdit:focus {
+            border: 2px solid #3498db;
+            border-radius: 6px;
+        }
+    )");
+    backHeaderEdit->setStyleSheet(frontHeaderEdit->styleSheet());
+
+    connect(frontHeaderEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+        currentFrontHeader = text.trimmed();
+        if (currentDeckItem) markDeckAsDirty();
+    });
+    connect(backHeaderEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+        currentBackHeader = text.trimmed();
+        if (currentDeckItem) markDeckAsDirty();
+    });
+
     QPushButton *addCardBtn = new QPushButton("+", bottomArea);
     addCardBtn->setFixedSize(38, 38);
     addCardBtn->setStyleSheet(R"(
@@ -991,9 +1428,12 @@ void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
         }
     )");
     connect(addCardBtn, &QPushButton::clicked, this, [this]() { addCardRow(); });
-    headerL->addWidget(qLabel, 1);
-    headerL->addWidget(aLabel, 1);
+
+    headerL->addWidget(frontHeaderEdit, 1);
+    headerL->addWidget(backHeaderEdit, 1);
+    headerL->addSpacing(74);
     headerL->addWidget(addCardBtn);
+
     bottomL->addLayout(headerL);
 
     QScrollArea *scrollArea = new QScrollArea(bottomArea);
@@ -1083,6 +1523,7 @@ bool MainWindow::isCardCompletelyEmpty(const QString &front, const QString &back
 QPushButton* MainWindow::createDeckCard(QTreeWidgetItem* deckItem)
 {
     if (!deckItem) return nullptr;
+
     int mastery = getDeckAverageMastery(deckItem);
     QPushButton* card = new QPushButton();
     card->setFixedSize(210, 100);
@@ -1098,6 +1539,7 @@ QPushButton* MainWindow::createDeckCard(QTreeWidgetItem* deckItem)
             border: 2px solid #3498db;
         }
     )");
+
     QHBoxLayout* mainL = new QHBoxLayout(card);
     mainL->setSpacing(12);
     mainL->setContentsMargins(16, 8, 12, 8);
@@ -1116,14 +1558,18 @@ QPushButton* MainWindow::createDeckCard(QTreeWidgetItem* deckItem)
 
     MasteryRadial* radial = new MasteryRadial(card, 46);
     radial->setValue(mastery);
+
     radial->setToolTip(QString("Mastery: %1%").arg(mastery));
+
     radial->setStyleSheet("background-color: #34495e;");
+
     mainL->addLayout(textL, 1);
     mainL->addWidget(radial);
 
     connect(card, &QPushButton::clicked, this, [this, deckItem]() {
         deckTree->setCurrentItem(deckItem);
     });
+
     return card;
 }
 
@@ -1291,8 +1737,14 @@ void MainWindow::showHomePage()
     folderBtn = nullptr;
     QTreeWidgetItem *selectedItem = deckTree ? deckTree->currentItem() : nullptr;
     if (selectedItem && selectedItem->data(0, Qt::UserRole).toString() == "folder") {
+        QList<QPair<QString,QString>> folderCards = getAllCardsInFolder(selectedItem);
+        bool hasCards = !folderCards.isEmpty();
+
         folderBtn = new QPushButton("📁 This Folder", content);
-        folderBtn->setToolTip("Starts a quiz with 10 random flashcards taken from all the decks of this selected folder");
+        folderBtn->setToolTip(hasCards ?
+                                  "Starts a quiz with 10 random flashcards taken from all the decks of this selected folder" :
+                                  "Starts a quiz with 10 random flashcards taken from all the decks of this selected folder\n(This folder is empty - add some decks/cards first)");
+
         folderBtn->setStyleSheet(R"(
             QPushButton {
                 background-color: #3498db;
@@ -1314,7 +1766,10 @@ void MainWindow::showHomePage()
                 color: #bdc3c7;
             }
         )");
+
+        folderBtn->setEnabled(hasCards);
         connect(folderBtn, &QPushButton::clicked, this, &MainWindow::startFolderQuiz);
+        folderBtn->update();
     }
 
     // Quiz Type Button
@@ -1356,14 +1811,14 @@ void MainWindow::showHomePage()
     bool hasAnyCards = (getTotalCards() > 0);
     randomDeckBtn->setEnabled(hasAnyCards);
     libraryBtn->setEnabled(hasAnyCards);
-    if (folderBtn) folderBtn->setEnabled(hasAnyCards);
 
     auto createBoxedRow = [&](const QString& title, const QList<QTreeWidgetItem*>& decks, const QString& accentColor) -> QWidget* {
         if (decks.isEmpty()) return nullptr;
         QWidget* box = new QWidget();
         box->setStyleSheet("background-color: #2c3e50; border-radius: 8px;");
         box->setContentsMargins(15, 15, 0, 0);
-        QVBoxLayout* boxL = new QVBoxLayout(box);
+        QVBoxLayout* boxL = new QVBoxLayout();
+        box->setLayout(boxL);
         if (QWidget* r = createHorizontalDeckRow(title, decks, accentColor))
             boxL->addWidget(r);
         return box;
@@ -1485,7 +1940,14 @@ void MainWindow::onItemChanged(QTreeWidgetItem *item, int column)
 {
     Q_UNUSED(column);
     if (!item) return;
+
+    if (item == currentDeckItem && numQuestionsSpinBox != nullptr) {
+        saveDecks();
+        return;
+    }
+
     saveDecks();
+
     if (item == currentDeckItem) {
         showDeckContent(item);
     }
@@ -1522,13 +1984,21 @@ QWidget* MainWindow::createCardRow(const QString &front, const QString &back, in
     radial->setToolTip(QString("Mastery: %1%").arg(mastery));
     radialL->addWidget(radial);
 
-    QTextEdit *qEdit = new QTextEdit(front, rowWidget);
-    QTextEdit *aEdit = new QTextEdit(back, rowWidget);
+    QTextEdit *qEdit = new QTextEdit(rowWidget);
+    QTextEdit *aEdit = new QTextEdit(rowWidget);
+    qEdit->setPlainText(front);
+    aEdit->setPlainText(back);
+
+    qEdit->setAcceptRichText(false);
+    aEdit->setAcceptRichText(false);
+
     QFont textFont("Segoe UI", 14);
     qEdit->setFont(textFont);
     aEdit->setFont(textFont);
     qEdit->setPlaceholderText("Question Text");
     aEdit->setPlaceholderText("Answer Text");
+    setupCardTextEdit(qEdit);
+    setupCardTextEdit(aEdit);
     qEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     aEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     qEdit->setMinimumWidth(180);
@@ -1543,8 +2013,9 @@ QWidget* MainWindow::createCardRow(const QString &front, const QString &back, in
     aEdit->document()->setDefaultTextOption(centerOption);
     QString editStyle = R"(
         QTextEdit { background-color: #2c3e50; color: white; border: none;
-                    border-radius: 6px; padding: 12px; text-align: center; }
+                    border-radius: 12px; padding: 12px; text-align: center; }
         QTextEdit:placeholder { text-align: center; color: #95a5a6; }
+        QTextEdit:hover { border: 2px solid #3498db; }
     )";
     qEdit->setStyleSheet(editStyle);
     aEdit->setStyleSheet(editStyle);
@@ -1597,6 +2068,11 @@ QWidget* MainWindow::createCardRow(const QString &front, const QString &back, in
                 menu.exec(rowWidget->mapToGlobal(pos));
             });
 
+    QTimer::singleShot(0, this, [this, qEdit, aEdit]() {
+        if (qEdit) resizeRowToContent(qEdit);
+        if (aEdit) resizeRowToContent(aEdit);
+    });
+
     return rowWidget;
 }
 
@@ -1619,39 +2095,60 @@ void MainWindow::swapCardFrontAndBack(QWidget *rowWidget)
     backEdit->setPlainText(front);
 
     markDeckAsDirty();
-    resizeRowToContent(frontEdit);  // update heights
+    resizeRowToContent(frontEdit);
 }
 
 void MainWindow::addCardRow(const QString &front, const QString &back, int mastery)
 {
     if (!cardRowsLayout) return;
-    cardRowsLayout->addWidget(createCardRow(front, back, mastery));
-    QTimer::singleShot(10, this, &MainWindow::updateNumQuestionsRange);
+
+    QWidget *newRow = createCardRow(front, back, mastery);
+    cardRowsLayout->addWidget(newRow);
+
+    QTimer::singleShot(10, this, [this, newRow]() {
+        QHBoxLayout *rowL = qobject_cast<QHBoxLayout*>(newRow->layout());
+        if (rowL) {
+            QTextEdit *qEdit = qobject_cast<QTextEdit*>(rowL->itemAt(1)->widget());
+            QTextEdit *aEdit = qobject_cast<QTextEdit*>(rowL->itemAt(2)->widget());
+            if (qEdit) resizeRowToContent(qEdit);
+            if (aEdit) resizeRowToContent(aEdit);
+        }
+    });
+
+    updateNumQuestionsRange();
 }
 
 void MainWindow::resizeRowToContent(QTextEdit *edit)
 {
     if (!edit || !edit->document()) return;
+
     QWidget *rowWidget = qobject_cast<QWidget*>(edit->parentWidget());
     if (!rowWidget) return;
+
     QHBoxLayout *rowL = qobject_cast<QHBoxLayout*>(rowWidget->layout());
     if (!rowL) return;
+
     QTextEdit *qEdit = qobject_cast<QTextEdit*>(rowL->itemAt(1)->widget());
     QTextEdit *aEdit = qobject_cast<QTextEdit*>(rowL->itemAt(2)->widget());
     if (!qEdit || !aEdit) return;
+
     int viewportW = edit->viewport()->width();
-    if (viewportW < 80) return;
+    if (viewportW < 100) return;
+
     qEdit->document()->setTextWidth(viewportW);
     aEdit->document()->setTextWidth(viewportW);
+
     int qHeight = static_cast<int>(qEdit->document()->size().height()) + 24;
     int aHeight = static_cast<int>(aEdit->document()->size().height()) + 24;
-    int finalTextHeight = qMax(qMax(qHeight, aHeight), 80);
-    if (qAbs(qEdit->height() - finalTextHeight) > 3)
+    int finalTextHeight = qMax(qMax(qHeight, aHeight), 82);
+
+    if (qAbs(qEdit->height() - finalTextHeight) > 5)
         qEdit->setFixedHeight(finalTextHeight);
-    if (qAbs(aEdit->height() - finalTextHeight) > 3)
+    if (qAbs(aEdit->height() - finalTextHeight) > 5)
         aEdit->setFixedHeight(finalTextHeight);
+
     int rowHeight = finalTextHeight + 32;
-    if (qAbs(rowWidget->height() - rowHeight) > 3) {
+    if (qAbs(rowWidget->height() - rowHeight) > 5) {
         rowWidget->setFixedHeight(rowHeight);
     }
 }
@@ -1659,14 +2156,18 @@ void MainWindow::resizeRowToContent(QTextEdit *edit)
 void MainWindow::updateAllCardHeights()
 {
     if (inQuizMode || !cardRowsLayout) return;
+
     for (int i = 0; i < cardRowsLayout->count(); ++i) {
         QLayoutItem *item = cardRowsLayout->itemAt(i);
         if (!item || !item->widget()) continue;
+
         QWidget *row = item->widget();
         QHBoxLayout *rowL = qobject_cast<QHBoxLayout*>(row->layout());
         if (!rowL) continue;
+
         QTextEdit *qEdit = qobject_cast<QTextEdit*>(rowL->itemAt(1)->widget());
         QTextEdit *aEdit = qobject_cast<QTextEdit*>(rowL->itemAt(2)->widget());
+
         if (qEdit) resizeRowToContent(qEdit);
         if (aEdit) resizeRowToContent(aEdit);
     }
@@ -1721,66 +2222,102 @@ void MainWindow::removeCardRow(QWidget *rowWidget)
 void MainWindow::saveCurrentDeckCards()
 {
     if (!currentDeckItem || !cardRowsLayout) return;
+
     QJsonArray cardsArray;
+
     for (int i = 0; i < cardRowsLayout->count(); ++i) {
         QLayoutItem *item = cardRowsLayout->itemAt(i);
         if (!item || !item->widget()) continue;
+
         QWidget *row = item->widget();
         QHBoxLayout *h = qobject_cast<QHBoxLayout*>(row->layout());
         if (!h) continue;
+
         QTextEdit *frontEdit = qobject_cast<QTextEdit*>(h->itemAt(1)->widget());
         QTextEdit *backEdit = qobject_cast<QTextEdit*>(h->itemAt(2)->widget());
+
         if (frontEdit && backEdit) {
             QString front = frontEdit->toPlainText().trimmed();
             QString back = backEdit->toPlainText().trimmed();
+
             if (front.isEmpty() && back.isEmpty()) continue;
+
             QJsonObject cardObj;
             cardObj["front"] = front;
             cardObj["back"] = back;
             cardObj["mastery"] = row->property("mastery").toInt();
+
             cardsArray.append(cardObj);
         }
     }
+
     currentDeckItem->setData(0, Qt::UserRole + 1, cardsArray);
+
+    if (countLabel) {
+        int newCount = cardsArray.size();
+        countLabel->setText(QString("%1 cards").arg(newCount));
+    }
+
     saveDecks();
     deckIsDirty = false;
     updateSaveButtonState();
+
+    if (startQuizButton) {
+        updateStartQuizButton();
+    }
+    if (currentDeckItem) {
+        currentDeckItem->setData(0, Qt::UserRole + 4, currentFrontHeader);
+        currentDeckItem->setData(0, Qt::UserRole + 5, currentBackHeader);
+    }
     updateNumQuestionsRange();
     if (deckMasteryRadial && currentDeckItem) {
         deckMasteryRadial->setValue(getDeckAverageMastery(currentDeckItem));
     }
 }
 
+// Update Mastery
 void MainWindow::applyMasteryFromQuiz()
 {
     if (!currentDeckItem) return;
     QJsonArray cards = currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray();
-    for (const auto &r : quizResults) {
-        if (r.second == -1) continue;
-        QString front = r.first.first;
+    bool changed = false;
+    for (const auto &resultPair : quizResults) {
+        const QPair<QString, QString>& quizCard = resultPair.first;
+        int result = resultPair.second;
+        if (result == -1) continue;
         for (int j = 0; j < cards.size(); ++j) {
-            QJsonObject obj = cards[j].toObject();
-            if (obj["front"].toString() == front) {
-                int m = obj.value("mastery").toInt(0);
-                m += (r.second == 1) ? 8 : -6;
-                obj["mastery"] = std::clamp(m, 0, 100);
-                cards[j] = obj;
+            QJsonObject cardObj = cards[j].toObject();
+            QString deckFront = cardObj["front"].toString();
+            QString deckBack  = cardObj["back"].toString();
+            if (deckFront == quizCard.first && deckBack == quizCard.second) {
+                int oldMastery = cardObj["mastery"].toInt(0);
+                int delta = (result == 1) ? masteryCorrectPoints : masteryIncorrectPoints;
+                int newMastery = std::clamp(oldMastery + delta, 0, 100);
+                if (newMastery != oldMastery) {
+                    cardObj["mastery"] = newMastery;
+                    cards[j] = cardObj;
+                    changed = true;
+                }
                 break;
             }
         }
     }
-    currentDeckItem->setData(0, Qt::UserRole + 1, cards);
-    saveDecks();
-    if (deckMasteryRadial && currentDeckItem) {
-        deckMasteryRadial->setValue(getDeckAverageMastery(currentDeckItem));
+    if (changed) {
+        currentDeckItem->setData(0, Qt::UserRole + 1, cards);
+        saveDecks();
+        if (deckMasteryRadial && currentDeckItem) {
+            deckMasteryRadial->setValue(getDeckAverageMastery(currentDeckItem));
+        }
     }
 }
+
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 {
     if (QLabel *grip = qobject_cast<QLabel*>(obj)) {
         QWidget *rowWidget = grip->property("rowWidget").value<QWidget*>();
         if (!rowWidget || !cardRowsLayout || !cardContainer) return false;
+
         if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent *me = static_cast<QMouseEvent*>(event);
             if (me->button() == Qt::LeftButton) {
@@ -1838,37 +2375,42 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
             return true;
         }
     }
+
     if (obj == deckTree->viewport() && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent *me = static_cast<QMouseEvent*>(event);
         if (!deckTree->itemAt(me->pos())) {
             if (inQuizMode) {
-                if (!confirmExitQuiz()) {
-                    return true;
-                }
+                if (!confirmExitQuiz()) return true;
                 endQuiz();
             }
-
-            if (deckTree->currentItem() != nullptr) {
-                deckTree->clearSelection();
-                deckTree->setCurrentItem(nullptr);
-                onDeckSelectionChanged();
-            } else {
-                deckTree->clearSelection();
-            }
+            QSignalBlocker blocker(deckTree);
+            deckTree->clearSelection();
+            deckTree->setCurrentItem(nullptr);
+            onDeckSelectionChanged();
             return true;
         }
     }
+
     return QMainWindow::eventFilter(obj, event);
 }
 
 void MainWindow::updateAddButtonsState()
 {
     QTreeWidgetItem *selected = deckTree->currentItem();
-    bool isFolder = (selected && selected->data(0, Qt::UserRole).toString() == "folder");
-    bool isRootOrFolder = !selected || isFolder;
+    QString type = selected ? selected->data(0, Qt::UserRole).toString() : QString();
 
-    addFolderBtn->setEnabled(true);
-    addDeckBtn->setEnabled(isRootOrFolder);
+    bool isDeckSelected = (type == "deck");
+
+    addFolderBtn->setEnabled(!isDeckSelected);
+    addDeckBtn->setEnabled(!isDeckSelected);
+
+    if (isDeckSelected) {
+        addFolderBtn->setToolTip("Cannot add folder or deck inside a deck");
+        addDeckBtn->setToolTip("Cannot add folder or deck inside a deck");
+    } else {
+        addFolderBtn->setToolTip("Add new folder");
+        addDeckBtn->setToolTip("Add new deck");
+    }
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event)
@@ -1886,6 +2428,12 @@ void MainWindow::resizeEvent(QResizeEvent *event)
                     adjustCardFontSize(frontLabel, frontLabel->text(), true);
                 }
             }
+        });
+    }
+
+    else if (!inQuizMode && cardRowsLayout && cardContainer) {
+        QTimer::singleShot(30, this, [this]() {
+            updateAllCardHeights();
         });
     }
 }
@@ -1957,15 +2505,6 @@ void MainWindow::updateToolbarActions()
     updateSaveButtonState();
 }
 
-void CustomTreeWidget::dropEvent(QDropEvent *event)
-{
-    QTreeWidget::dropEvent(event);
-
-    if (MainWindow* mw = qobject_cast<MainWindow*>(window())) {
-        mw->saveDecks();
-    }
-}
-
 void MainWindow::renameCurrentDeck()
 {
     ensureSidebarVisible();
@@ -1983,10 +2522,23 @@ void MainWindow::deleteCurrentDeck()
 {
     if (!currentDeckItem) return;
 
-    delete currentDeckItem;
-    currentDeckItem = nullptr;
-    clearMainContent();
+    QTreeWidgetItem *itemToDelete = currentDeckItem;
+
+    {
+        QSignalBlocker blocker(deckTree);
+        currentDeckItem = nullptr;
+        delete itemToDelete;
+
+        deckTree->clearSelection();
+        deckTree->setCurrentItem(nullptr);
+        deckTree->viewport()->update();
+    }
+
+    resetMainContent();
     saveDecks();
+    updateToolbarActions();
+    updateAddButtonsState();
+    showHomePage();
 }
 
 void MainWindow::deleteCurrentFolder()
@@ -1994,10 +2546,58 @@ void MainWindow::deleteCurrentFolder()
     QTreeWidgetItem *item = deckTree->currentItem();
     if (!item || item->data(0, Qt::UserRole).toString() != "folder") return;
 
-    delete item;
-    currentDeckItem = nullptr;
+    {
+        QSignalBlocker blocker(deckTree);
+        currentDeckItem = nullptr;
+        delete item;
+
+        deckTree->clearSelection();
+        deckTree->setCurrentItem(nullptr);
+        deckTree->viewport()->update();
+    }
+
+    resetMainContent();
     saveDecks();
-    clearMainContent();
+    updateToolbarActions();
+    updateAddButtonsState();
+    showHomePage();
+}
+
+void MainWindow::confirmDeleteCurrentDeck()
+{
+    if (!currentDeckItem) return;
+
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("Delete Deck");
+    msgBox.setText(QString("Delete deck \"%1\" and all its flashcards?\n\n"
+                           "This action cannot be undone.")
+                       .arg(currentDeckItem->text(0)));
+    msgBox.setIcon(QMessageBox::Warning);
+    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    msgBox.setDefaultButton(QMessageBox::No);
+
+    if (msgBox.exec() == QMessageBox::Yes) {
+        deleteCurrentDeck();
+    }
+}
+
+void MainWindow::confirmDeleteCurrentFolder()
+{
+    QTreeWidgetItem *item = deckTree->currentItem();
+    if (!item || item->data(0, Qt::UserRole).toString() != "folder") return;
+
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("Delete Folder");
+    msgBox.setText(QString("Delete folder \"%1\" and ALL decks + flashcards inside it?\n\n"
+                           "This action cannot be undone.")
+                       .arg(item->text(0)));
+    msgBox.setIcon(QMessageBox::Warning);
+    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    msgBox.setDefaultButton(QMessageBox::No);
+
+    if (msgBox.exec() == QMessageBox::Yes) {
+        deleteCurrentFolder();
+    }
 }
 
 void MainWindow::resetDeckMastery()
@@ -2062,7 +2662,13 @@ QTreeWidgetItem* MainWindow::duplicateTreeItemRecursive(QTreeWidgetItem *source,
             newItem->setData(0, Qt::UserRole + 1, cardsVar);
         }
         newItem->setData(0, Qt::UserRole + 2, QDateTime::currentDateTime().toString(Qt::ISODate));
-    } else if (type == "folder") {
+
+        int preferredNum = source->data(0, Qt::UserRole + 3).toInt(0);
+        if (preferredNum > 0) {
+            newItem->setData(0, Qt::UserRole + 3, preferredNum);
+        }
+    }
+    else if (type == "folder") {
         newItem->setIcon(0, QIcon::fromTheme("folder"));
     }
 
@@ -2206,6 +2812,18 @@ void MainWindow::updateSaveButtonState()
     }
 }
 
+void MainWindow::updateStartQuizButton()
+{
+    if (startQuizButton) {
+        int cardCount = currentDeckItem ?
+                            currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray().size() : 0;
+
+        bool isMCQ = !lastUsedFlashcardMode;
+        bool enabled = (cardCount > 0) && !(isMCQ && cardCount == 1);
+        startQuizButton->setEnabled(enabled);
+    }
+}
+
 void MainWindow::updateNumQuestionsRange()
 {
     if (!numQuestionsSpinBox || !currentDeckItem) return;
@@ -2229,6 +2847,10 @@ void MainWindow::duplicateCardRow(QWidget *sourceRow)
     int idx = cardRowsLayout->indexOf(sourceRow);
     QWidget *newRow = createCardRow(q->toPlainText(), a->toPlainText(), mastery);
     cardRowsLayout->insertWidget(idx + 1, newRow);
+    cardContainer->updateGeometry();
+    QTimer::singleShot(30, this, [this]() {
+        updateAllCardHeights();
+    });
     markDeckAsDirty();
     updateNumQuestionsRange();
 }
@@ -2243,8 +2865,9 @@ void MainWindow::startQuiz()
         lastUsedShuffle = userWantsShuffle;
     }
 
-    int desiredQuestions = -1;
-    if (!isReviewMode && numQuestionsSpinBox) {
+    int desiredQuestions = 10;
+
+    if (!isReviewMode && currentDeckItem && numQuestionsSpinBox) {
         desiredQuestions = numQuestionsSpinBox->value();
     }
 
@@ -2256,13 +2879,35 @@ void MainWindow::startQuiz()
         usingSavedQuiz = true;
         useExactQuizCards = false;
         pendingExactQuizCards.clear();
+
+        if (lastUsedShuffle && quizCardList.size() > 1) {
+            std::random_device rd;
+            std::mt19937 g(rd());
+            std::shuffle(quizCardList.begin(), quizCardList.end(), g);
+        }
     }
 
     allDeckBacks.clear();
 
+    if (usingSavedQuiz && !quizCardList.isEmpty()) {
+        if (currentDeckItem) {
+            QJsonArray cardsJson = currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray();
+            for (const QJsonValue &val : cardsJson) {
+                QString back = val.toObject()["back"].toString();
+                if (!back.isEmpty() && !allDeckBacks.contains(back))
+                    allDeckBacks << back;
+            }
+        } else {
+            QList<QPair<QString, QString>> allCards = getAllLibraryCards();
+            for (const auto &p : allCards) {
+                if (!p.second.isEmpty() && !allDeckBacks.contains(p.second))
+                    allDeckBacks << p.second;
+            }
+        }
+    }
+
     if (!usingSavedQuiz) {
         quizCardList.clear();
-
         if (currentDeckItem) {
             QJsonArray cardsJson = currentDeckItem->data(0, Qt::UserRole + 1).toJsonArray();
             for (const QJsonValue &val : cardsJson) {
@@ -2281,7 +2926,6 @@ void MainWindow::startQuiz()
                 }
             }
         }
-
         if (quizCardList.isEmpty()) {
             QMessageBox::warning(this, "No Cards", "Your library has no flashcards yet!\nAdd some cards first.");
             if (currentDeckItem) showDeckContent(currentDeckItem);
@@ -2291,35 +2935,37 @@ void MainWindow::startQuiz()
     }
 
     int totalAvailable = quizCardList.size();
-    int numToUse = (!isReviewMode && desiredQuestions > 0) ? desiredQuestions : totalAvailable;
-    if (numToUse > totalAvailable) numToUse = totalAvailable;
+    int targetSize = (!isReviewMode && desiredQuestions > 0)
+                         ? desiredQuestions
+                         : totalAvailable;
+    if (targetSize < 1) targetSize = 1;
 
-    if (!userWantsFlashcard && totalAvailable < 4) {
-        if (totalAvailable == 1) {
-            QMessageBox::information(this, "Not Enough Cards",
-                                     "Multiple Choice needs at least 2 cards.\n\nSwitch to Flashcard mode or add more cards.");
-            if (currentDeckItem) showDeckContent(currentDeckItem);
-            return;
+    if (!usingSavedQuiz) {
+        if (targetSize > totalAvailable && totalAvailable > 0) {
+            QList<QPair<QString, QString>> basePool = quizCardList;
+
+            if (userWantsShuffle) {
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(basePool.begin(), basePool.end(), g);
+            }
+
+            quizCardList.clear();
+            while (quizCardList.size() < targetSize) {
+                quizCardList += basePool;
+            }
+            quizCardList.resize(targetSize);
+        } else {
+            if (userWantsShuffle && quizCardList.size() > 1) {
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(quizCardList.begin(), quizCardList.end(), g);
+            }
+            quizCardList.resize(targetSize);
         }
-        // 2 or 3 cards are allowed - we'll handle gracefully in loadCurrentQuestion()
-    }
-
-    /*
-    int numToUse;
-    if (!currentDeckItem && !isReviewMode) {
-        numToUse = 10;
     } else {
-        numToUse = (!isReviewMode && desiredQuestions > 0) ? desiredQuestions : quizCardList.size();
+        quizCardList.resize(targetSize);
     }
-    if (numToUse > quizCardList.size()) numToUse = quizCardList.size();
-    */
-
-    if (userWantsShuffle) {
-        std::random_device rd;
-        std::mt19937 g(rd());
-        std::shuffle(quizCardList.begin(), quizCardList.end(), g);
-    }
-    quizCardList.resize(numToUse);
 
     quizResults.clear();
     for (const auto &p : quizCardList) {
@@ -2412,7 +3058,21 @@ void MainWindow::startQuiz()
         nextButton->setFocusPolicy(Qt::NoFocus);
         connect(prevButton, &QPushButton::clicked, this, &MainWindow::prevCard);
         connect(actionButton, &QPushButton::clicked, this, &MainWindow::flipCard);
-        connect(nextButton, &QPushButton::clicked, this, &MainWindow::nextCard);
+        connect(nextButton, &QPushButton::clicked, this, [this]() {
+            if (!answered) {
+                if (currentCardIndex < quizResults.size()) {
+                    quizResults[currentCardIndex].second = -1;
+                }
+            }
+
+            currentCardIndex++;
+
+            if (currentCardIndex >= quizCardList.size()) {
+                showResultsPage();
+            } else {
+                loadCurrentQuestion();
+            }
+        });
 
         ratingContainer = new QWidget(navContainer);
         QHBoxLayout *ratingL = new QHBoxLayout(ratingContainer);
@@ -2551,10 +3211,6 @@ void MainWindow::flipOrNextCard()
 
 void MainWindow::nextCard()
 {
-    if (isFlashcardMode && currentCardIndex < quizResults.size()) {
-        if (quizResults[currentCardIndex].second == -1) {
-        }
-    }
     if (currentCardIndex >= quizCardList.size() - 1) {
         showResultsPage();
     } else {
@@ -2577,7 +3233,7 @@ void MainWindow::flipCard()
     cardFlipped = true;
 
     if (backLabel && currentCardIndex < quizCardList.size()) {
-        QString displayBack = quizCardList[currentCardIndex].second;
+        QString displayBack = getDisplayedBack(quizCardList[currentCardIndex]);
 
         if (displayBack.trimmed().isEmpty()) {
             displayBack = "[Empty Answer]";
@@ -2609,16 +3265,43 @@ void MainWindow::markWrongAndNext()
 
 void MainWindow::endQuiz()
 {
-    endQuizConfirmPending = false;
-    if (endQuizAction) {
-        endQuizAction->setText("End Quiz");
-        endQuizAction->setIcon(QIcon::fromTheme("process-stop", QIcon::fromTheme("dialog-cancel")));
-    }
+    inQuizMode = false;
+    currentCardIndex = 0;
+    score = 0;
+    cardFlipped = false;
+    answered = false;
     isReviewMode = false;
-    resetMainContent();
-    isSettingsPage = false;
-    if (currentDeckItem) showDeckContent(currentDeckItem);
-    else clearMainContent();
+    useExactQuizCards = false;
+    pendingExactQuizCards.clear();
+    quizCardList.clear();
+    quizResults.clear();
+
+    quizWidget = nullptr;
+    resultsWidget = nullptr;
+    frontLabel = nullptr;
+    backLabel = nullptr;
+    feedbackLabel = nullptr;
+    actionButton = nullptr;
+    nextButton = nullptr;
+    prevButton = nullptr;
+    directionButton = nullptr;
+    ratingContainer = nullptr;
+    correctButton = nullptr;
+    wrongButton = nullptr;
+    choiceButtons.clear();
+    choiceLabels.clear();
+
+    if (mainContentLayout) {
+        QLayoutItem *item;
+        while ((item = mainContentLayout->takeAt(0)) != nullptr) {
+            if (QWidget *w = item->widget()) {
+                w->hide();
+                w->setParent(nullptr);
+                w->deleteLater();
+            }
+            delete item;
+        }
+    }
 }
 
 void MainWindow::handleEndQuizClick()
@@ -2628,25 +3311,29 @@ void MainWindow::handleEndQuizClick()
         endQuizConfirmPending = false;
         endQuizAction->setText("End Quiz");
         endQuizAction->setIcon(QIcon::fromTheme("process-stop", QIcon::fromTheme("dialog-cancel")));
-        if (QToolButton* btn = qobject_cast<QToolButton*>(navToolBar->widgetForAction(endQuizAction))) {
+        if (QToolButton* btn = qobject_cast<QToolButton*>(navToolBar->widgetForAction(endQuizAction)))
             btn->setStyleSheet("");
-        }
+
         endQuiz();
+
+        QTimer::singleShot(0, this, [this]() {
+            returnToPreviousLocation();
+        });
     } else {
         endQuizConfirmPending = true;
         endQuizAction->setText("You sure?");
         endQuizAction->setIcon(QIcon::fromTheme("dialog-warning"));
-        if (QToolButton* btn = qobject_cast<QToolButton*>(navToolBar->widgetForAction(endQuizAction))) {
-        }
+        if (QToolButton* btn = qobject_cast<QToolButton*>(navToolBar->widgetForAction(endQuizAction)))
+            btn->setStyleSheet("QToolButton { background-color: #e74c3c; color: white; font-weight: bold; }");
+
         QTimer::singleShot(5000, this, [this]() {
             if (endQuizConfirmPending) {
                 endQuizConfirmPending = false;
                 if (endQuizAction) {
                     endQuizAction->setText("End Quiz");
                     endQuizAction->setIcon(QIcon::fromTheme("process-stop", QIcon::fromTheme("dialog-cancel")));
-                    if (QToolButton* btn = qobject_cast<QToolButton*>(navToolBar->widgetForAction(endQuizAction))) {
+                    if (QToolButton* btn = qobject_cast<QToolButton*>(navToolBar->widgetForAction(endQuizAction)))
                         btn->setStyleSheet("");
-                    }
                 }
             }
         });
@@ -2662,6 +3349,17 @@ bool MainWindow::confirmExitQuiz()
     msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
     msgBox.setDefaultButton(QMessageBox::No);
     return msgBox.exec() == QMessageBox::Yes;
+}
+
+void MainWindow::returnToPreviousLocation()
+{
+    if (currentDeckItem && currentDeckItem->data(0, Qt::UserRole).toString() == "deck") {
+        showDeckContent(currentDeckItem);
+    } else {
+        showHomePage();
+    }
+    updateToolbarActions();
+    updateAddButtonsState();
 }
 
 void MainWindow::handleDeleteDeckClick()
@@ -2738,7 +3436,8 @@ void MainWindow::handleResetMasteryClick()
         resetMasteryAction->setText("Reset really?");
         resetMasteryAction->setIcon(QIcon::fromTheme("dialog-warning"));
         if (QToolButton* btn = qobject_cast<QToolButton*>(navToolBar->widgetForAction(resetMasteryAction)))
-            btn->setStyleSheet("QToolButton { background-color: #e74c3c; color: white; }");
+            btn->setStyleSheet("QToolButton { background-color: #e74c3c; color: white; font-weight: bold; border: 1px solid #e74c3c; border-radius: 5px; padding: 3px 0px }"
+                               "QToolButton:hover { border: 1px solid #ffffff; }");
         QTimer::singleShot(5000, this, [this]() {
             if (resetMasteryConfirmPending) {
                 resetMasteryConfirmPending = false;
@@ -2754,165 +3453,188 @@ void MainWindow::handleResetMasteryClick()
 // Quiz Results Page
 void MainWindow::showResultsPage()
 {
-    applyMasteryFromQuiz();
-    if (currentDeckItem) updateDeckLastQuiz(currentDeckItem);
-    updateDailyStreak();
-    resetMainContent();
-    inQuizMode = true;
-    updateToolbarActions();
-    resultsWidget = new QWidget();
-    resultsWidget->setStyleSheet("background-color: #4A5259;");
-    QVBoxLayout *resLayout = new QVBoxLayout(resultsWidget);
-    resLayout->setContentsMargins(30, 30, 30, 30);
-    resLayout->setSpacing(25);
+    QTimer::singleShot(0, this, [this]() {
+        applyMasteryFromQuiz();
 
-    int total = quizResults.size();
-    int correctCount = 0;
-    for (const auto &r : quizResults) {
-        if (r.second == 1) correctCount++;
-    }
-    int wrongCount = 0;
-    for (const auto &r : quizResults) {
-        if (r.second == 0) wrongCount++;
-    }
-    QLabel *scoreLabel = new QLabel(QString("%1 / %2 correct 🎉").arg(correctCount).arg(total), resultsWidget);
-    scoreLabel->setAlignment(Qt::AlignCenter);
-    scoreLabel->setStyleSheet("font-size: 42px; font-weight: bold; color: white;");
-    resLayout->addWidget(scoreLabel);
+        if (currentDeckItem) {
+            updateDeckLastQuiz(currentDeckItem);
+        }
+        updateDailyStreak();
 
-    QScrollArea *scroll = new QScrollArea(resultsWidget);
-    scroll->setWidgetResizable(true);
-    scroll->setStyleSheet("background: transparent; border: none;");
-    QWidget *listContainer = new QWidget();
-    QVBoxLayout *listL = new QVBoxLayout(listContainer);
-    listL->setSpacing(12);
-    listL->setContentsMargins(0, 0, 0, 0);
-    for (const auto &r : quizResults) {
-        QWidget *row = new QWidget();
-        QString statusText;
-        QString rowStyle;
-        QString statusColor;
-        if (r.second == 1) {
-            statusText = "✅ Correct";
-            rowStyle = "background-color: #34495e; border-radius: 12px; padding: 16px; border: 2px solid #2ecc71;";
-            statusColor = "#2ecc71";
-        } else if (r.second == 0) {
-            statusText = "❌ Wrong";
-            rowStyle = "background-color: #34495e; border-radius: 12px; padding: 16px; border: 2px solid #e74c3c;";
-            statusColor = "#e74c3c";
-        } else {
-            statusText = "⏭ Skipped";
-            rowStyle = "background-color: #34495e; border-radius: 12px; padding: 16px; border: 2px solid #f39c12;";
-            statusColor = "#f39c12";
-        }
-        row->setStyleSheet(rowStyle);
-        QHBoxLayout *rowL = new QHBoxLayout(row);
-        rowL->setSpacing(20);
-        QLabel *front = new QLabel(r.first.first, row);
-        front->setStyleSheet("font-size: 20px; font-weight: bold; color: white;");
-        front->setWordWrap(true);
-        QLabel *back = new QLabel(r.first.second, row);
-        back->setStyleSheet("font-size: 20px; color: #95a5a6;");
-        back->setWordWrap(true);
-        QLabel *status = new QLabel(statusText, row);
-        status->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 18px;").arg(statusColor));
-        rowL->addWidget(front, 1);
-        rowL->addWidget(back, 1);
-        rowL->addWidget(status);
-        listL->addWidget(row);
-    }
-    scroll->setWidget(listContainer);
-    resLayout->addWidget(scroll, 1);
+        resetMainContent();
 
-    QWidget *btnRow = new QWidget();
-    QHBoxLayout *btnL = new QHBoxLayout(btnRow);
-    btnL->setSpacing(20);
-    QPushButton *retakeBtn = new QPushButton("Retake Quiz", btnRow);
-    QPushButton *reviewBtn = new QPushButton("Review Wrong Answers", btnRow);
-    QPushButton *backBtn = new QPushButton("Back to Deck", btnRow);
-    QString blueStyle = R"(
-        QPushButton {
-            background-color: #3498db;
-            color: white;
-            padding: 14px 32px;
-            font-size: 16px;
-            font-weight: bold;
-            border-radius: 10px;
-            border: none;
-        }
-        QPushButton:hover {
-            background-color: #4aa3df;
-            border: 2px solid #ffffff;
-            padding: 12px 30px;
-        }
-    )";
-    QString grayStyle = R"(
-        QPushButton {
-            background-color: #2c3e50;
-            color: white;
-            padding: 14px 32px;
-            font-size: 16px;
-            font-weight: bold;
-            border-radius: 10px;
-            border: none;
-        }
-        QPushButton:hover {
-            background-color: #34495e;
-            border: 2px solid #3498db;
-            padding: 12px 30px;
-        }
-    )";
-    retakeBtn->setStyleSheet(blueStyle);
-    reviewBtn->setStyleSheet(blueStyle);
-    backBtn->setStyleSheet(grayStyle);
-    reviewBtn->setEnabled(wrongCount > 0);
-    if (wrongCount == 0) {
-        reviewBtn->setText("No mistakes 🎉");
-    }
-    connect(retakeBtn, &QPushButton::clicked, this, [this]() {
-        isReviewMode = false;
-        if (!quizCardList.isEmpty()) {
-            pendingExactQuizCards = quizCardList;
-            useExactQuizCards = true;
-            lastUsedFlashcardMode = isFlashcardMode;
-        }
-        QTimer::singleShot(0, this, [this]() { startQuiz(); });
-    });
-    connect(reviewBtn, &QPushButton::clicked, this, [this]() {
-        reviewCardList.clear();
+        inQuizMode = true;
+        updateToolbarActions();
+
+        resultsWidget = new QWidget();
+        resultsWidget->setStyleSheet("background-color: #4A5259;");
+        QVBoxLayout *resLayout = new QVBoxLayout(resultsWidget);
+        resLayout->setContentsMargins(30, 30, 30, 30);
+        resLayout->setSpacing(25);
+
+        int total = quizResults.size();
+        int correctCount = 0;
+        int wrongCount = 0;
         for (const auto &r : quizResults) {
-            if (r.second == 0) {
-                reviewCardList << r.first;
+            if (r.second == 1) correctCount++;
+            else if (r.second == 0) wrongCount++;
+        }
+
+        QLabel *scoreLabel = new QLabel(QString("%1 / %2 correct 🎉").arg(correctCount).arg(total), resultsWidget);
+        scoreLabel->setAlignment(Qt::AlignCenter);
+        scoreLabel->setStyleSheet("font-size: 42px; font-weight: bold; color: white;");
+        resLayout->addWidget(scoreLabel);
+
+        QScrollArea *scroll = new QScrollArea(resultsWidget);
+        scroll->setWidgetResizable(true);
+        scroll->setStyleSheet("background: transparent; border: none;");
+        QWidget *listContainer = new QWidget();
+        QVBoxLayout *listL = new QVBoxLayout(listContainer);
+        listL->setSpacing(12);
+        listL->setContentsMargins(0, 0, 0, 0);
+
+        for (const auto &r : quizResults) {
+            QWidget *row = new QWidget();
+            QString statusText, rowStyle, statusColor;
+
+            if (r.second == 1) {
+                statusText = "✅ Correct";
+                rowStyle = "background-color: #34495e; border-radius: 12px; padding: 16px; border: 2px solid #2ecc71;";
+                statusColor = "#2ecc71";
+            } else if (r.second == 0) {
+                statusText = "❌ Wrong";
+                rowStyle = "background-color: #34495e; border-radius: 12px; padding: 16px; border: 2px solid #e74c3c;";
+                statusColor = "#e74c3c";
+            } else {
+                statusText = "⏭ Skipped";
+                rowStyle = "background-color: #34495e; border-radius: 12px; padding: 16px; border: 2px solid #f39c12;";
+                statusColor = "#f39c12";
             }
+
+            row->setStyleSheet(rowStyle);
+            QHBoxLayout *rowL = new QHBoxLayout(row);
+            rowL->setSpacing(20);
+
+            QLabel *front = new QLabel(row);
+            setCardText(front, r.first.first);
+            front->setStyleSheet("font-size: 20px; font-weight: bold; color: white;");
+            front->setWordWrap(true);
+
+            QLabel *back = new QLabel(row);
+            setCardText(back, r.first.second);
+            back->setStyleSheet("font-size: 20px; color: #95a5a6;");
+            back->setWordWrap(true);
+
+            QLabel *status = new QLabel(statusText, row);
+            status->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 18px;").arg(statusColor));
+
+            rowL->addWidget(front, 1);
+            rowL->addWidget(back, 1);
+            rowL->addWidget(status);
+            listL->addWidget(row);
         }
-        if (reviewCardList.isEmpty()) {
-            QMessageBox::information(this, "All Good!", "No wrong answers to review!");
-            return;
-        }
-        isReviewMode = true;
-        QTimer::singleShot(0, this, [this]() { startQuiz(); });
+
+        scroll->setWidget(listContainer);
+        resLayout->addWidget(scroll, 1);
+
+        // Bottom buttons
+        QWidget *btnRow = new QWidget();
+        QHBoxLayout *btnL = new QHBoxLayout(btnRow);
+        btnL->setSpacing(20);
+
+        QPushButton *retakeBtn = new QPushButton("Retake Quiz", btnRow);
+        QPushButton *reviewBtn = new QPushButton("Review Wrong Answers", btnRow);
+        QPushButton *backBtn = new QPushButton("Back to Deck", btnRow);
+
+        QString blueStyle = R"(
+            QPushButton { background-color: #3498db; color: white; padding: 14px 32px;
+                          font-size: 16px; font-weight: bold; border-radius: 10px; border: none; }
+            QPushButton:hover { background-color: #4aa3df; border: 2px solid #ffffff; padding: 12px 30px; }
+        )";
+        QString grayStyle = R"(
+            QPushButton { background-color: #2c3e50; color: white; padding: 14px 32px;
+                          font-size: 16px; font-weight: bold; border-radius: 10px; border: none; }
+            QPushButton:hover { background-color: #34495e; border: 2px solid #3498db; padding: 12px 30px; }
+        )";
+
+        retakeBtn->setStyleSheet(blueStyle);
+        reviewBtn->setStyleSheet(blueStyle);
+        backBtn->setStyleSheet(grayStyle);
+
+        reviewBtn->setEnabled(wrongCount > 0);
+        if (wrongCount == 0) reviewBtn->setText("No mistakes 🎉");
+
+        connect(retakeBtn, &QPushButton::clicked, this, [this]() {
+            QTimer::singleShot(0, this, [this]() {
+                isReviewMode = false;
+                if (!quizCardList.isEmpty()) {
+                    pendingExactQuizCards = quizCardList;
+                    useExactQuizCards = true;
+                }
+                startQuiz();
+            });
+        });
+
+        connect(reviewBtn, &QPushButton::clicked, this, [this]() {
+            QTimer::singleShot(0, this, [this]() {
+                QList<QPair<QString, QString>> wrongCards;
+                for (const auto &r : quizResults) {
+                    if (r.second == 0) wrongCards << r.first;
+                }
+                if (wrongCards.isEmpty()) {
+                    QMessageBox::information(this, "All Good!", "No wrong answers to review!");
+                    return;
+                }
+                pendingExactQuizCards = wrongCards;
+                useExactQuizCards = true;
+                isReviewMode = true;
+                startQuiz();
+            });
+        });
+
+        connect(backBtn, &QPushButton::clicked, this, [this]() {
+            QTimer::singleShot(0, this, [this]() {
+                endQuiz();
+
+                if (currentDeckItem && currentDeckItem->data(0, Qt::UserRole).toString() == "deck") {
+                    showDeckContent(currentDeckItem);
+                } else {
+                    showHomePage();
+                }
+                updateToolbarActions();
+                updateAddButtonsState();
+            });
+        });
+
+        btnL->addWidget(retakeBtn);
+        btnL->addWidget(reviewBtn);
+        btnL->addWidget(backBtn);
+        resLayout->addWidget(btnRow);
+
+        QTimer::singleShot(0, this, [this]() {
+            if (mainContentLayout && resultsWidget) {
+                mainContentLayout->addWidget(resultsWidget);
+            }
+        });
     });
-    connect(backBtn, &QPushButton::clicked, this, &MainWindow::endQuiz);
-    btnL->addWidget(retakeBtn);
-    btnL->addWidget(reviewBtn);
-    btnL->addWidget(backBtn);
-    resLayout->addWidget(btnRow);
-    mainContentLayout->addWidget(resultsWidget);
 }
 
 void MainWindow::loadCurrentQuestion()
 {
-    if (currentCardIndex >= quizCardList.size() || currentCardIndex >= quizResults.size()) {
-        qWarning() << "Invalid state in loadCurrentQuestion - index" << currentCardIndex;
+    if (currentCardIndex >= quizCardList.size()) {
         endQuiz();
         return;
+    }
+
+    if (currentCardIndex >= quizResults.size()) {
+        quizResults.resize(quizCardList.size(), qMakePair(QPair<QString,QString>(), -1));
     }
 
     answered = false;
     auto card = quizCardList[currentCardIndex];
 
-    QString displayFront = card.first;
-    QString displayBack  = card.second;
+    QString displayFront = getDisplayedFront(card);
+    QString displayBack  = getDisplayedBack(card);
 
     if (displayFront.trimmed().isEmpty()) {
         displayFront = "[Empty Question]";
@@ -2927,7 +3649,7 @@ void MainWindow::loadCurrentQuestion()
     if (isFlashcardMode) {
         adjustCardFontSize(frontLabel, displayFront, false);
         if (backLabel) {
-            backLabel->setText(displayBack);
+            setCardText(backLabel, displayBack);
             backLabel->setVisible(false);
         }
         if (actionButton) {
@@ -2946,17 +3668,41 @@ void MainWindow::loadCurrentQuestion()
             nextButton->setEnabled(true);
         }
     } else {
-        frontLabel->setText(card.first);
-        adjustCardFontSize(frontLabel, card.first, true);
+        answered = false;
+
+        auto card = quizCardList[currentCardIndex];
+
+        QString questionSide  = getDisplayedFront(card);
+        QString correctAnswer = getDisplayedBack(card);
+
+        frontLabel->setText(questionSide);
+        adjustCardFontSize(frontLabel, questionSide, true);
+
         if (feedbackLabel) feedbackLabel->setText("");
         if (nextButton) nextButton->setEnabled(false);
 
-        QString correct = card.second;
+        resetChoiceButtonStyles();
 
-        QStringList options = {correct};
+        bool questionIsOriginalFront = (questionSide == card.first);
+
+        QStringList options = {correctAnswer};
         QStringList possibleDistractors;
-        for (const QString &back : allDeckBacks) {
-            if (back != correct) possibleDistractors << back;
+
+        if (!allDeckBacks.isEmpty()) {
+            for (const QString &answer : allDeckBacks) {
+                if (!answer.trimmed().isEmpty() && answer != correctAnswer) {
+                    possibleDistractors << answer;
+                }
+            }
+        } else {
+            for (const auto &c : quizCardList) {
+                QString distractor = questionIsOriginalFront ? c.second : c.first;
+                if (!distractor.trimmed().isEmpty() &&
+                    distractor != correctAnswer &&
+                    !possibleDistractors.contains(distractor)) {
+                    possibleDistractors << distractor;
+                }
+            }
         }
 
         std::random_device rd;
@@ -2969,14 +3715,11 @@ void MainWindow::loadCurrentQuestion()
 
         std::shuffle(options.begin(), options.end(), g);
 
-        int numChoices = options.size();
-
         for (int i = 0; i < 4 && i < choiceButtons.size(); ++i) {
-            if (i < numChoices) {
-                QString text = options[i];
-                choiceLabels[i]->setText(text);
-                choiceButtons[i]->setEnabled(true);
+            if (i < options.size()) {
+                setCardText(choiceLabels[i], options[i]);
                 choiceButtons[i]->setVisible(true);
+                choiceButtons[i]->setEnabled(true);
             } else {
                 choiceButtons[i]->setVisible(false);
             }
@@ -2988,13 +3731,37 @@ void MainWindow::loadCurrentQuestion()
     }
 }
 
+void MainWindow::resetChoiceButtonStyles()
+{
+    QString defaultChoiceStyle = R"(
+        QPushButton {
+            background-color: #2c3e50;
+            border: 3px solid #455a6f;
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 17px;
+            font-weight: bold;
+            color: white;
+        }
+        QPushButton:hover {
+            border-color: #3498db;
+        }
+    )";
+
+    for (QPushButton *btn : choiceButtons) {
+        if (btn) btn->setStyleSheet(defaultChoiceStyle);
+        btn->setEnabled(true);
+    }
+}
+
 void MainWindow::adjustCardFontSize(QLabel* label, const QString& text, bool isMultipleChoice)
 {
     if (text.isEmpty()) {
         label->clear();
         return;
     }
-    label->setText(text);
+
+    setCardText(label, text);
     label->setWordWrap(true);
     label->setAlignment(Qt::AlignCenter);
 
@@ -3048,7 +3815,7 @@ void MainWindow::onMultipleChoiceButtonClicked(QPushButton *clickedButton)
     answered = true;
 
     QString selectedText = clickedButton->findChild<QLabel*>()->text();
-    QString correctAnswer = quizCardList[currentCardIndex].second;
+    QString correctAnswer = getDisplayedBack(quizCardList[currentCardIndex]);
     bool isCorrect = (selectedText == correctAnswer);
 
     quizResults[currentCardIndex].second = isCorrect ? 1 : 0;
@@ -3056,7 +3823,6 @@ void MainWindow::onMultipleChoiceButtonClicked(QPushButton *clickedButton)
 
     for (int i = 0; i < choiceButtons.size(); ++i) {
         QPushButton *btn = choiceButtons[i];
-        QLabel *lbl = choiceLabels[i];
         btn->setEnabled(false);
 
         if (btn == clickedButton) {
@@ -3092,6 +3858,13 @@ void MainWindow::onMultipleChoiceButtonClicked(QPushButton *clickedButton)
 // Settings Page
 void MainWindow::showSettingsPage()
 {
+    if (inQuizMode) {
+        if (!confirmExitQuiz()) {
+            return;
+        }
+        endQuiz();
+    }
+
     resetMainContent();
     isSettingsPage = true;
     QWidget *settingsWidget = new QWidget();
@@ -3114,7 +3887,7 @@ void MainWindow::showSettingsPage()
         }
         QPushButton:hover { border: 2px solid #3498db; }
     )");
-    connect(backBtn, &QPushButton::clicked, this, &MainWindow::endQuiz);
+    connect(backBtn, &QPushButton::clicked, this, &MainWindow::returnToPreviousLocation);
 
     QLabel *title = new QLabel("Settings", settingsWidget);
     title->setStyleSheet("font-size: 32px; font-weight: bold; color: white;");
@@ -3138,6 +3911,11 @@ void MainWindow::showSettingsPage()
 
     // Start on Page
     QHBoxLayout *startRow = new QHBoxLayout();
+    startRow->setSpacing(15);
+
+    QHBoxLayout *startContent = new QHBoxLayout();
+    startContent->setSpacing(12);
+
     QLabel *startLabel = new QLabel("Start on page:", settingsWidget);
     startLabel->setStyleSheet("background-color: #2c3e50; color: #bdc3c7; font-size: 15px;");
 
@@ -3185,10 +3963,13 @@ void MainWindow::showSettingsPage()
     updateTargetCombo(startOnLaunchType);
     targetCombo->setVisible(startOnLaunchType != "home");
 
-    startRow->addWidget(startLabel);
-    startRow->addWidget(typeCombo);
-    startRow->addWidget(targetCombo);
-    startRow->addStretch();
+    startContent->addWidget(startLabel);
+    startContent->addWidget(typeCombo);
+    startContent->addWidget(targetCombo);
+
+    startRow->addStretch(1);
+    startRow->addLayout(startContent);
+    startRow->addStretch(1);
 
     generalL->addLayout(startRow);
 
@@ -3199,7 +3980,110 @@ void MainWindow::showSettingsPage()
     masteryGroup->setStyleSheet("QGroupBox { background-color: #2c3e50; font-weight: bold; font-size: 18px; color: white; padding: 10px; border-radius: 8px; }");
     QVBoxLayout *masteryL = new QVBoxLayout(masteryGroup);
     masteryL->setContentsMargins(15, 30, 15, 15);
-    masteryL->setSpacing(12);
+    masteryL->setSpacing(18);
+
+    QHBoxLayout *masteryRow = new QHBoxLayout();
+    masteryRow->setSpacing(12);
+
+    QHBoxLayout *contentGroup = new QHBoxLayout();
+    contentGroup->setSpacing(12);
+
+    QLabel *masteryRateLabel = new QLabel("Mastery gain / penalty per answer:", settingsWidget);
+    masteryRateLabel->setStyleSheet("background-color: #2c3e50; color: #bdc3c7; font-size: 15px;");
+
+    QSpinBox *correctSpin = new QSpinBox(settingsWidget);
+    correctSpin->setMinimum(0);
+    correctSpin->setMaximum(100);
+    correctSpin->setValue(masteryCorrectPoints);
+    correctSpin->setSuffix(" pts");
+    correctSpin->setFixedWidth(110);
+    correctSpin->setAlignment(Qt::AlignCenter);
+
+    QSpinBox *wrongSpin = new QSpinBox(settingsWidget);
+    wrongSpin->setMinimum(0);
+    wrongSpin->setMaximum(100);
+    wrongSpin->setValue(qAbs(masteryIncorrectPoints));
+    wrongSpin->setSuffix(" pts");
+    wrongSpin->setPrefix("-");
+    wrongSpin->setFixedWidth(110);
+    wrongSpin->setAlignment(Qt::AlignCenter);
+
+    QString spinStyle = R"(
+        QSpinBox {
+            background-color: #2c3e50;
+            color: white;
+            border: 2px solid #455a6f;
+            border-radius: 10px;
+            padding: 4px 8px;
+            font-size: 15px;
+            font-weight: bold;
+        }
+        QSpinBox:hover { border: 2px solid #3498db; }
+        QSpinBox::up-button { width: 25px; background-color: #34495e; border: none; border-top-right-radius: 8px; }
+        QSpinBox::down-button { width: 25px; background-color: #34495e; border: none; border-bottom-right-radius: 8px; }
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover { background-color: #3498db; }
+        QSpinBox::up-arrow { border-left:6px solid #34495e; border-right:6px solid #34495e; border-bottom:8px solid #bdc3c7; width:0; height:0; }
+        QSpinBox::down-arrow { border-left:6px solid #34495e; border-right:6px solid #34495e; border-top:8px solid #bdc3c7; width:0; height:0; }
+        QSpinBox::up-arrow:hover, QSpinBox::down-arrow:hover { border-left:6px solid #3498db; border-right:6px solid #3498db; }
+    )";
+
+    correctSpin->setStyleSheet(spinStyle);
+    wrongSpin->setStyleSheet(spinStyle);
+
+    connect(correctSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int val){ masteryCorrectPoints = val; saveSettings(); });
+    connect(wrongSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int val){ masteryIncorrectPoints = -val; saveSettings(); });
+
+    contentGroup->addWidget(masteryRateLabel);
+    contentGroup->addWidget(correctSpin);
+    contentGroup->addWidget(wrongSpin);
+
+    // Restore Defaults button
+    QPushButton *restoreDefaultsBtn = new QPushButton("Restore Defaults", settingsWidget);
+    restoreDefaultsBtn->setToolTip("Reset to +8 / -6");
+    restoreDefaultsBtn->setStyleSheet(R"(
+        QPushButton {
+            background-color: #f39c12;
+            color: white;
+            padding: 12px 24px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 8px;
+            border: none;
+            min-width: 160px;
+            margin-left: 10px;
+        }
+        QPushButton:hover { background-color: #e67e22; border: 2px solid white; }
+        QPushButton:disabled { background-color: #7f8c8d; color: #bdc3c7; }
+    )");
+
+    auto updateRestoreButton = [restoreDefaultsBtn, correctSpin, wrongSpin, this]() {
+        bool isDefault = (correctSpin->value() == 8 && wrongSpin->value() == 6);
+        restoreDefaultsBtn->setEnabled(!isDefault);
+    };
+
+    connect(correctSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, updateRestoreButton);
+    connect(wrongSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, updateRestoreButton);
+
+    updateRestoreButton();
+
+    connect(restoreDefaultsBtn, &QPushButton::clicked, this, [this, correctSpin, wrongSpin]() {
+        masteryCorrectPoints = 8;
+        masteryIncorrectPoints = -6;
+        correctSpin->setValue(8);
+        wrongSpin->setValue(6);
+        saveSettings();
+        QMessageBox::information(this, "Defaults Restored", "Mastery points reset to +8 / -6.");
+    });
+
+    contentGroup->addWidget(restoreDefaultsBtn);
+
+    masteryRow->addStretch(1);
+    masteryRow->addLayout(contentGroup);
+    masteryRow->addStretch(1);
+
+    masteryL->addLayout(masteryRow);
 
     // Reset All Masteries
     QPushButton *resetMasteryBtn = new QPushButton("Reset All Masteries", settingsWidget);
@@ -3215,15 +4099,15 @@ void MainWindow::showSettingsPage()
             border: none;
             min-width: 160px;
         }
-        QPushButton:hover { background-color: #e74c3c; border: 2px solid white }
+        QPushButton:hover { background-color: #e74c3c; border: 2px solid white; }
     )");
     connect(resetMasteryBtn, &QPushButton::clicked, this, &MainWindow::resetAllMasteries);
 
-    QHBoxLayout *masteryCenterL = new QHBoxLayout();
-    masteryCenterL->addStretch(1);
-    masteryCenterL->addWidget(resetMasteryBtn);
-    masteryCenterL->addStretch(1);
-    masteryL->addLayout(masteryCenterL);
+    QHBoxLayout *resetRow = new QHBoxLayout();
+    resetRow->addStretch(1);
+    resetRow->addWidget(resetMasteryBtn);
+    resetRow->addStretch(1);
+    masteryL->addLayout(resetRow);
 
     mainL->addWidget(masteryGroup);
 
@@ -3548,18 +4432,22 @@ void MainWindow::showChangelog()
 
 void MainWindow::updateDeckLastQuiz(QTreeWidgetItem *deck)
 {
-    if (!deck || deck->data(0, Qt::UserRole).toString() != "deck") return;
+    if (!deck || deck->data(0, Qt::UserRole).toString() != "deck") {
+        return;
+    }
     deck->setData(0, Qt::UserRole + 2, QDateTime::currentDateTime().toString(Qt::ISODate));
     saveDecks();
 }
 
 int MainWindow::getTotalDecks()
 {
+    if (!deckTree) return 0;
     return collectDecksRecursive(deckTree->invisibleRootItem()).size();
 }
 
 int MainWindow::getTotalCards()
 {
+    if (!deckTree) return 0;
     int total = 0;
     auto decks = collectDecksRecursive(deckTree->invisibleRootItem());
     for (auto d : decks) {
@@ -3570,10 +4458,13 @@ int MainWindow::getTotalCards()
 
 int MainWindow::getOverallMastery()
 {
+    if (!deckTree) return 0;
     auto all = collectDecksRecursive(deckTree->invisibleRootItem());
     if (all.isEmpty()) return 0;
     int sum = 0;
-    for (auto d : all) sum += getDeckAverageMastery(d);
+    for (auto d : all) {
+        sum += getDeckAverageMastery(d);
+    }
     return sum / all.size();
 }
 
@@ -3608,7 +4499,6 @@ void MainWindow::updateDailyStreak()
     else {
         dailyStreak++;
     }
-
     lastStreakDate = today;
     saveSettings();
 }
@@ -3619,6 +4509,8 @@ void MainWindow::startGlobalQuiz(bool flashcardMode)
     currentDeckItem = nullptr;
     lastUsedFlashcardMode = flashcardMode;
     isReviewMode = false;
+    lastUsedShuffle = true;
+    lastUsedQuizDirection = QuizDirection::FrontToBack;
     startQuiz();
 }
 
@@ -3629,6 +4521,9 @@ void MainWindow::startRandomDeckQuiz()
         QMessageBox::information(this, "No Decks", "You have no decks yet!");
         return;
     }
+    lastUsedShuffle = true;
+    lastUsedQuizDirection = QuizDirection::FrontToBack;
+
     QTreeWidgetItem *randomDeck = allDecks[QRandomGenerator::global()->bounded(allDecks.size())];
     deckTree->setCurrentItem(randomDeck);
     currentDeckItem = randomDeck;
@@ -3638,6 +4533,9 @@ void MainWindow::startRandomDeckQuiz()
 
 void MainWindow::startLibraryQuiz()
 {
+    lastUsedShuffle = true;
+    lastUsedQuizDirection = QuizDirection::FrontToBack;
+
     deckTree->clearSelection();
     currentDeckItem = nullptr;
     if (numQuestionsSpinBox) numQuestionsSpinBox->setValue(10);
@@ -3658,6 +4556,9 @@ void MainWindow::startFolderQuiz()
         QMessageBox::information(this, "No Cards", "This folder (and its subfolders) has no flashcards yet!");
         return;
     }
+
+    lastUsedShuffle = true;
+    lastUsedQuizDirection = QuizDirection::FrontToBack;
 
     deckTree->clearSelection();
     currentDeckItem = nullptr;
@@ -3722,6 +4623,9 @@ void MainWindow::deleteAllData()
         return;
     }
 
+    deckTree->clearSelection();
+    currentDeckItem = nullptr;
+
     deckTree->clear();
     saveDecks();
     clearMainContent();
@@ -3734,6 +4638,7 @@ void MainWindow::saveSettings()
     settingsObj["sidebarWidth"] = lastSidebarWidth;
     settingsObj["quizFlashcardMode"] = lastUsedFlashcardMode;
     settingsObj["quizShuffle"] = lastUsedShuffle;
+    settingsObj["quizDirection"] = static_cast<int>(lastUsedQuizDirection);
     settingsObj["startOnLaunchType"] = startOnLaunchType;
     settingsObj["startOnLaunchTarget"] = startOnLaunchTarget;
     settingsObj["dailyStreak"] = dailyStreak;
@@ -3741,6 +4646,8 @@ void MainWindow::saveSettings()
         settingsObj["lastStreakDate"] = lastStreakDate.toString(Qt::ISODate);
 
     QJsonDocument doc(settingsObj);
+    settingsObj["masteryCorrectPoints"] = masteryCorrectPoints;
+    settingsObj["masteryIncorrectPoints"] = masteryIncorrectPoints;
     QFile file(settingsFilePath);
     if (file.open(QIODevice::WriteOnly)) {
         file.write(doc.toJson(QJsonDocument::Compact));
@@ -3769,10 +4676,15 @@ void MainWindow::loadSettings()
             lastUsedFlashcardMode = settings["quizFlashcardMode"].toBool(true);
         if (settings.contains("quizShuffle"))
             lastUsedShuffle = settings["quizShuffle"].toBool(true);
+        if (settings.contains("quizDirection"))
+            lastUsedQuizDirection = static_cast<QuizDirection>(settings["quizDirection"].toInt(0));
         if (settings.contains("startOnLaunchType"))
             startOnLaunchType = settings["startOnLaunchType"].toString("home");
         if (settings.contains("startOnLaunchTarget"))
             startOnLaunchTarget = settings["startOnLaunchTarget"].toString("");
+
+        masteryCorrectPoints = settings.value("masteryCorrectPoints").toInt(8);
+        masteryIncorrectPoints = settings.value("masteryIncorrectPoints").toInt(-6);
 
         dailyStreak = settings.value("dailyStreak").toInt(0);
         QString dateStr = settings.value("lastStreakDate").toString();
@@ -3968,7 +4880,7 @@ void MainWindow::showAboutDialog()
     titleLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(titleLabel);
 
-    QLabel *versionLabel = new QLabel("Version 1.1", aboutDialog);
+    QLabel *versionLabel = new QLabel("Version 1.2", aboutDialog);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 16px; color: #bdc3c7;");
     layout->addWidget(versionLabel);
@@ -4093,4 +5005,59 @@ void MainWindow::showFullLicense()
 
     licenseDlg->exec();
     delete licenseDlg;
+}
+
+void MainWindow::updateDirectionButtonText()
+{
+    if (!directionButton) return;
+
+    QString text = (lastUsedQuizDirection == QuizDirection::FrontToBack)
+                       ? "Front → Back"
+                       : "Back → Front";
+
+    directionButton->setText(text);
+    directionButton->setStyleSheet(R"(
+        QPushButton {
+            background-color: #8e44ad;
+            color: white;
+            padding: 14px 24px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 10px;
+            border: none;
+        }
+        QPushButton:hover { border: 2px solid white; }
+    )");
+}
+
+void MainWindow::expandSubtree(QTreeWidgetItem *item)
+{
+    if (!item) return;
+    item->setExpanded(true);
+    for (int i = 0; i < item->childCount(); ++i) {
+        expandSubtree(item->child(i));
+    }
+}
+
+void MainWindow::collapseSubtree(QTreeWidgetItem *item)
+{
+    if (!item) return;
+    item->setExpanded(false);
+    for (int i = 0; i < item->childCount(); ++i) {
+        collapseSubtree(item->child(i));
+    }
+}
+
+QString MainWindow::getDisplayedFront(const QPair<QString, QString>& card) const
+{
+    if (lastUsedQuizDirection == QuizDirection::BackToFront)
+        return card.second;
+    return card.first;
+}
+
+QString MainWindow::getDisplayedBack(const QPair<QString, QString>& card) const
+{
+    if (lastUsedQuizDirection == QuizDirection::BackToFront)
+        return card.first;
+    return card.second;
 }
