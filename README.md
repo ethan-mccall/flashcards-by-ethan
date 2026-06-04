@@ -62,13 +62,8 @@ sudo dpkg --purge flashcards-by-ethan
 
 #### Snap
 ```bash
-# Install / Update
-sudo snap install flashcards-by-ethan
-# or
-sudo snap refresh flashcards-by-ethan
-
-# Uninstall
-sudo snap remove flashcards-by-ethan
-# or fully purge:
-sudo snap remove --purge flashcards-by-ethan
+# Install
+sudo snap install flashcards-by-ethan_1.2.1_amd64.snap --dangerous
 ```
+<h6>snap still currently in manual review.
+
