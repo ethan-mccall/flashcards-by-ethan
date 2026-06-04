@@ -408,8 +408,8 @@ MainWindow::MainWindow(QWidget *parent)
     , lastStreakDate()
 
     // Mastery Settings
-    , masteryCorrectPoints(8)
-    , masteryIncorrectPoints(-6)
+    , masteryCorrectPoints(10)
+    , masteryIncorrectPoints(-5)
 
     // Last Used Quiz Preferences
     , lastUsedFlashcardMode(true)
@@ -1101,6 +1101,8 @@ void MainWindow::resetMainContent()
     shuffleButton = nullptr;
     numQuestionsSpinBox = nullptr;
     deckMasteryRadial = nullptr;
+    deckTitle = nullptr;
+    countLabel = nullptr;
     quizStyleGroup = nullptr;
 
     quizWidget = nullptr;
@@ -1202,7 +1204,7 @@ void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
     )");
     radialL->addWidget(deckMasteryRadial);
 
-    QLabel *deckTitle = new QLabel(deckItem->text(0), topArea);
+    deckTitle = new QLabel(deckItem->text(0), topArea);
     deckTitle->setWordWrap(true);
     deckTitle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     deckTitle->setStyleSheet("font-size: 28px; font-weight: bold; color: white; line-height: 1.25;");
@@ -1386,6 +1388,11 @@ void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
     frontHeaderEdit->setAlignment(Qt::AlignCenter);
     backHeaderEdit->setAlignment(Qt::AlignCenter);
 
+    frontHeaderEdit->setToolTip("Click to edit label");
+    backHeaderEdit->setToolTip("Click to edit label");
+    frontHeaderEdit->setCursor(Qt::IBeamCursor);
+    backHeaderEdit->setCursor(Qt::IBeamCursor);
+
     frontHeaderEdit->setStyleSheet(R"(
         QLineEdit {
             background: transparent;
@@ -1394,6 +1401,10 @@ void MainWindow::showDeckContent(QTreeWidgetItem *deckItem)
             font-weight: bold;
             border: none;
             padding: 4px;
+        }
+        QLineEdit:hover {
+            border: 1px solid #5dade2;
+            border-radius: 6px;
         }
         QLineEdit:focus {
             border: 2px solid #3498db;
@@ -1943,6 +1954,9 @@ void MainWindow::onItemChanged(QTreeWidgetItem *item, int column)
 
     if (item == currentDeckItem && numQuestionsSpinBox != nullptr) {
         saveDecks();
+        if (deckTitle) {
+            deckTitle->setText(item->text(0));
+        }
         return;
     }
 
@@ -4041,7 +4055,7 @@ void MainWindow::showSettingsPage()
 
     // Restore Defaults button
     QPushButton *restoreDefaultsBtn = new QPushButton("Restore Defaults", settingsWidget);
-    restoreDefaultsBtn->setToolTip("Reset to +8 / -6");
+    restoreDefaultsBtn->setToolTip("Reset to +10 / -5");
     restoreDefaultsBtn->setStyleSheet(R"(
         QPushButton {
             background-color: #f39c12;
@@ -4059,7 +4073,7 @@ void MainWindow::showSettingsPage()
     )");
 
     auto updateRestoreButton = [restoreDefaultsBtn, correctSpin, wrongSpin, this]() {
-        bool isDefault = (correctSpin->value() == 8 && wrongSpin->value() == 6);
+        bool isDefault = (correctSpin->value() == 10 && wrongSpin->value() == 5);
         restoreDefaultsBtn->setEnabled(!isDefault);
     };
 
@@ -4069,12 +4083,12 @@ void MainWindow::showSettingsPage()
     updateRestoreButton();
 
     connect(restoreDefaultsBtn, &QPushButton::clicked, this, [this, correctSpin, wrongSpin]() {
-        masteryCorrectPoints = 8;
-        masteryIncorrectPoints = -6;
-        correctSpin->setValue(8);
-        wrongSpin->setValue(6);
+        masteryCorrectPoints = 10;
+        masteryIncorrectPoints = -5;
+        correctSpin->setValue(10);
+        wrongSpin->setValue(5);
         saveSettings();
-        QMessageBox::information(this, "Defaults Restored", "Mastery points reset to +8 / -6.");
+        QMessageBox::information(this, "Defaults Restored", "Mastery points reset to +10 / -5.");
     });
 
     contentGroup->addWidget(restoreDefaultsBtn);
@@ -4645,9 +4659,10 @@ void MainWindow::saveSettings()
     if (lastStreakDate.isValid())
         settingsObj["lastStreakDate"] = lastStreakDate.toString(Qt::ISODate);
 
-    QJsonDocument doc(settingsObj);
     settingsObj["masteryCorrectPoints"] = masteryCorrectPoints;
     settingsObj["masteryIncorrectPoints"] = masteryIncorrectPoints;
+
+    QJsonDocument doc(settingsObj);
     QFile file(settingsFilePath);
     if (file.open(QIODevice::WriteOnly)) {
         file.write(doc.toJson(QJsonDocument::Compact));
@@ -4683,8 +4698,8 @@ void MainWindow::loadSettings()
         if (settings.contains("startOnLaunchTarget"))
             startOnLaunchTarget = settings["startOnLaunchTarget"].toString("");
 
-        masteryCorrectPoints = settings.value("masteryCorrectPoints").toInt(8);
-        masteryIncorrectPoints = settings.value("masteryIncorrectPoints").toInt(-6);
+        masteryCorrectPoints = settings.value("masteryCorrectPoints").toInt(10);
+        masteryIncorrectPoints = settings.value("masteryIncorrectPoints").toInt(-5);
 
         dailyStreak = settings.value("dailyStreak").toInt(0);
         QString dateStr = settings.value("lastStreakDate").toString();
@@ -4880,7 +4895,7 @@ void MainWindow::showAboutDialog()
     titleLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(titleLabel);
 
-    QLabel *versionLabel = new QLabel("Version 1.2", aboutDialog);
+    QLabel *versionLabel = new QLabel("Version 1.2.1", aboutDialog);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 16px; color: #bdc3c7;");
     layout->addWidget(versionLabel);

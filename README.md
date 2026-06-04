@@ -1,4 +1,4 @@
-# Flashcards by Ethan (v1.2)
+# Flashcards by Ethan (v1.2.1)
 
 **A clean, modern, and distraction-free flashcard + quiz app.**
 
@@ -21,13 +21,21 @@
 
 ---
 
-| Home Page | Deck Editor |
-|----------|-------------|
-| ![Overview](images/screenshot-home-page.png) | ![Deck Editor](images/screenshot-deck-page.png) |
+| Home Page |
+|----------|
+| ![Overview](images/screenshot-home-page.png) |
 
-| Flashcard Quiz | Multiple Choice Quiz |
-|----------------|----------------------|
-| ![Flashcard Mode](images/screenshot-flashcard-quiz.png) | ![Quiz Mode](images/screenshot-multi-choice-quiz.png) |
+| Deck Editor |
+|-------------|
+| ![Deck Editor](images/screenshot-deck-page.png) |
+
+| Flashcard Quiz |
+|----------------|
+| ![Flashcard Mode](images/screenshot-flashcard-quiz.png) |
+
+| Multiple Choice Quiz |
+|----------------------|
+| ![Quiz Mode](images/screenshot-multi-choice-quiz.png) |
 
 ---
 
@@ -36,34 +44,31 @@
 ### Debian / Ubuntu
 
 Download the latest `.deb` from the [Releases page](https://github.com/ethan-mccall/flashcards-by-ethan/releases) and run:
+```bash
+#Install
+sudo dpkg -i flashcards-by-ethan_*.deb
+sudo apt install -f
 
-```bash
+# Update
+wget https://github.com/ethan-mccall/flashcards-by-ethan/releases/latest/download/flashcards-by-ethan_1.2.1_amd64.deb
 sudo dpkg -i flashcards-by-ethan_*.deb
 sudo apt install -f
-```
-To update an existing `.deb`, run:
-```bash
-wget https://github.com/ethan-mccall/flashcards-by-ethan/releases/latest/download/flashcards-by-ethan_1.2_amd64.deb
-sudo dpkg -i flashcards-by-ethan_*.deb
-sudo apt install -f
-```
-To uninstall `.deb`, run:
-```bash
+
+# Uninstall
 sudo dpkg -r flashcards-by-ethan
-or
+# or fully remove config files too:
 sudo dpkg --purge flashcards-by-ethan
 ```
 
-### Snap
-Download the latest `.snap` from the [Releases page](https://github.com/ethan-mccall/flashcards-by-ethan/releases) and run:
+#### Snap
 ```bash
-sudo snap install flashcards-by-ethan_1.2_amd64.snap --dangerous
-```
-><h6>snap currently waiting in manual review.
+# Install / Update
+sudo snap install flashcards-by-ethan
+# or
+sudo snap refresh flashcards-by-ethan
 
-To uninstall `.snap`, run:
-```bash
+# Uninstall
 sudo snap remove flashcards-by-ethan
-or
+# or fully purge:
 sudo snap remove --purge flashcards-by-ethan
 ```

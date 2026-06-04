@@ -98,6 +98,7 @@ private:
     QPushButton *libraryBtn = nullptr;
     QPushButton *folderBtn = nullptr;
     QPushButton *styleToggleBtn = nullptr;
+    QLabel *deckTitle = nullptr;
     QLabel *countLabel = nullptr;
 
     // Toolbar & Actions

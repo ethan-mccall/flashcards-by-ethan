@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Flashcards VERSION 1.2 LANGUAGES CXX)
+project(Flashcards VERSION 1.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,18 +28,22 @@ qt_add_executable(Flashcards
     mainwindow.cpp
     mainwindow.h
     resources.qrc
-    snap/snapcraft.yaml
-    snap/gui/flashcards-by-ethan.desktop
-    README.md
+    installer/build-installer.ps1 installer/Flashcards.iss README.md
+    snap/gui/flashcards-by-ethan.desktop snap/snapcraft.yaml
 )
 
-# Windows Icon
+# Windows icon
 if(WIN32 AND EXISTS "${ICON_RC}")
-    target_sources(Flashcards PRIVATE "${ICON_RC}")
-
-    set_source_files_properties("${ICON_RC}" PROPERTIES
-        OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/Flashcards_autogen/mocs_compilation.cpp"
+    add_library(flashcards_winicon OBJECT "${ICON_RC}")
+    set_target_properties(flashcards_winicon PROPERTIES
+        AUTOMOC OFF
+        AUTORCC OFF
+        AUTOUIC OFF
     )
+    target_include_directories(flashcards_winicon PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/windows"
+    )
+    target_sources(Flashcards PRIVATE $<TARGET_OBJECTS:flashcards_winicon>)
 endif()
 if(WIN32)
     set_target_properties(Flashcards PROPERTIES
