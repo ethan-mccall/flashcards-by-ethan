@@ -67,3 +67,5 @@ sudo snap install flashcards-by-ethan_1.2.1_amd64.snap --dangerous
 ```
 <h6>snap still currently in manual review.
 
+#### Windows
+Download the lastest `Windows.zip` or `.exe` from the [Releases page](https://github.com/ethan-mccall/flashcards-by-ethan/releases)
